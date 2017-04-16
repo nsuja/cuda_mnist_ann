@@ -31,6 +31,7 @@
  * @brief Core unit of the neural network (neuron and synapses)
  */
 struct Cuda_Cell{
+	int n_inputs;
 	double *input;
 	double *weight;
 	double output;
@@ -64,7 +65,8 @@ extern "C" int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_ce
 {
 	cudaError_t err = cudaSuccess;
 	l->cell = (Cuda_Cell*)calloc(1, sizeof(Cuda_Cell) * n_output_cells);
-	for(int i = 0; i < n_input_cells; i++) {
+	l->cell->n_inputs = n_input_cells;
+	for(int i = 0; i < n_output_cells; i++) {
 		err = cudaMalloc((void **)&l->cell[i].input, sizeof(double) * n_input_cells);
 		if (err != cudaSuccess) {
 			fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
@@ -91,22 +93,22 @@ extern "C" int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_ce
 	return 0;
 }
 
-//void cuda_set_cell_input(Cell *c, MNIST_Image *img)
-//{
-//	for (int i=0; i<NUMBER_OF_INPUT_CELLS; i++){
-//		c->input[i] = img->pixel[i] ? 1 : 0;
-//	}
-//}
-//
-//extern "C" void cuda_train_cell(Cell *c, MNIST_Image *img, int target)
-//{
-//	cuda_set_cell_input(c, img);
+void cuda_set_cell_input(Cuda_Cell *c, MNIST_Image *img)
+{
+	//for (int i=0; i < c->n_inputs; i++){
+	//	c->input[i] = img->pixel[i] ? 1 : 0;
+	//}
+}
+
+extern "C" void cuda_train_cell(Cuda_Layer *l, int n_cell, MNIST_Image *img, int target)
+{
+	cuda_set_cell_input(&l->cell[n_cell], img);
 //	calcCellOutput(c);
 //
 //	// learning (by updating the weights)
 //	double err = getCellError(c, target);
 //	updateCellWeights(c, err);
-//}
+}
 
 extern "C" int copy_to_cuda(uint8_t *buf, int size)
 {

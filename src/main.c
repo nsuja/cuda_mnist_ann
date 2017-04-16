@@ -39,7 +39,7 @@
  * @param l A pointer to the layer that is to be training
  */
 
-void trainLayer(Layer *l)
+void trainLayers(Layer *l, Cuda_Layer *cu_l)
 {
 	int ret;
 	// open MNIST files
@@ -76,6 +76,7 @@ void trainLayer(Layer *l)
 
 		// loop through all output cells for the given image
 		for (int i=0; i < NUMBER_OF_OUTPUT_CELLS; i++){
+			cuda_train_cell(cu_l, i, &img, targetOutput.val[i]);
 			trainCell(&l->cell[i], &img, targetOutput.val[i]);
 		}
 
@@ -171,12 +172,12 @@ int main(int argc, const char * argv[]) {
 
 	// inicializacion cuda
 	Cuda_Layer cuda_outputLayer;
-	if(cuda_init_layer(&cuda_outputLayer)) {
+	if(cuda_init_layer(&cuda_outputLayer, NUMBER_OF_INPUT_CELLS, NUMBER_OF_OUTPUT_CELLS)) {
 		fprintf(stderr, "Error inicializando cuda layer\n");
 		return -1;
 	}
 
-	trainLayer(&outputLayer);
+	trainLayers(&outputLayer, &cuda_outputLayer);
 
 	testLayer(&outputLayer);
 

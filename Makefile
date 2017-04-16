@@ -149,7 +149,7 @@ else
       BUILD_TYPE := release
 endif
 
-ALL_CCFLAGS :=
+ALL_CCFLAGS := -g
 ALL_CCFLAGS += $(NVCCFLAGS)
 ALL_CCFLAGS += $(EXTRA_NVCCFLAGS)
 ALL_CCFLAGS += $(addprefix -Xcompiler ,$(CCFLAGS))
@@ -218,7 +218,7 @@ HEADERS=$(SRC_PATH)/utils/mnist-utils.h \
 		$(SRC_PATH)/1lnn.h \
 		$(SRC_PATH)/cuda/cuda_utils.h
 
-CFLAGS= $(CINCLUDE_PATH)
+CFLAGS= -g $(CINCLUDE_PATH)
 
 LDFLAGS=-L/opt/cuda/lib64 -lcuda -lcudart -lstdc++
 

@@ -5,6 +5,7 @@
  * @author Matt Lind
  * @date July 2015
  */
+#pragma once
 
 #include <stdint.h>
 #include <stdio.h>
