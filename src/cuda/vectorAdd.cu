@@ -27,6 +27,14 @@
 
 #include "cuda_utils.h"
 
+#define min(x,y) (x>y?x:y)
+#define N 784
+
+#define THREAD_PER_BLOCK 16
+
+//smallest multiple of threadsPerBlock that is greater than or equal to N
+#define BLOCK_PER_GRID min(32 , (N+THREAD_PER_BLOCK-1) / THREAD_PER_BLOCK )
+
 /**
  * @brief Core unit of the neural network (neuron and synapses)
  */
@@ -44,15 +52,56 @@ struct Cuda_Cell{
  * Computes the vector addition of A and B into C. The 3 vectors have the same
  * number of elements numElements.
  */
-__global__ void
+	__global__ void
 vectorAdd(const float *A, const float *B, float *C, int numElements)
 {
-    int i = blockDim.x * blockIdx.x + threadIdx.x;
+	int i = blockDim.x * blockIdx.x + threadIdx.x;
 
-    if (i < numElements)
-    {
-        C[i] = A[i] + B[i];
-    }
+	if (i < numElements)
+	{
+		C[i] = A[i] + B[i];
+	}
+}
+
+__global__ void printInput(const double *V1, const int size)
+{
+	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
+	printf("Input: Hola desde kernel blockdim %d blockidx %d thidx %d element[%d] %f\n", blockDim.x, blockIdx.x, threadIdx.x, tid, V1[tid]);
+}
+
+__global__ void vectorDotProduct(const double *V1, const double *V2, double *V3)
+{
+	//Guarda la suma de cada thread
+	__shared__ double chache[THREAD_PER_BLOCK] ;
+	double temp = 0;
+	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
+	unsigned int chacheindex = threadIdx.x ;
+
+	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
+	while ( tid < N ) {
+		temp += V1[tid] * V2[tid] ;
+		//printf("(%d, %d, %d) tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, tid, V1[tid], V2[tid], temp);
+		tid += blockDim.x * gridDim.x;
+	}
+
+	chache[chacheindex] = temp;
+	__syncthreads(); //Espero a que todo termine
+
+	int i  = blockDim.x / 2 ;
+	//printf("i %d Cache block %d th %d %f\n", i, blockIdx.x, threadIdx.x, chache[chacheindex]);
+	while(i != 0) {
+		if(chacheindex < i)
+			chache[chacheindex] += chache[chacheindex + i];
+		//printf("sum i %d Cache block %d th %d %f\n", i, blockIdx.x, threadIdx.x, chache[chacheindex]);
+
+		__syncthreads();
+		i /= 2 ;
+	}
+
+	if(chacheindex == 0) {
+		V3[blockIdx.x] = chache[0];
+		printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
+	}
 }
 
 /**
@@ -80,34 +129,89 @@ extern "C" int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_ce
 		}
 	}
 
+	double *aux;
+	aux = (double*)malloc(n_input_cells * sizeof(double));
+
 	for (int o = 0; o < n_output_cells; o++){
 		for (int i = 0; i < n_input_cells; i++){
 			//TODO Inicializar en cuda
 			//l->cell[o].input[i]=0;
 			//l->cell[o].weight[i]=rand()/(double)(RAND_MAX);
+			//aux[i] = rand()/(double)(RAND_MAX);
+			aux[i] = 0.5;
 		}
-
+		err = cudaMemcpy(l->cell[o].weight, aux, n_input_cells * sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
+			return -1;
+		}
 		l->cell[o].output = 0; //FIXME redundante
 		l->cell[o].bias = 0; //FIXME redundante
 	}
+	//printInput<<<n_input_cells/16, 16>>>(l->cell[0].weight, n_input_cells);
+	free(aux);
+
 	return 0;
 }
 
-void cuda_set_cell_input(Cuda_Cell *c, MNIST_Image *img)
+int cuda_set_cell_input(Cuda_Cell *c, MNIST_Image *img)
 {
-	//for (int i=0; i < c->n_inputs; i++){
-	//	c->input[i] = img->pixel[i] ? 1 : 0;
-	//}
+	cudaError_t err = cudaSuccess;
+	double *aux;
+
+	aux = (double*)malloc(c->n_inputs * sizeof(double));
+	for(int i=0; i < c->n_inputs; i++){
+		aux[i] = img->pixel[i] ? 1 : 0;
+	}
+
+	err = cudaMemcpy(c->input, aux, c->n_inputs * sizeof(double), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+	free(aux);
+
+	return 0;
 }
 
-extern "C" void cuda_train_cell(Cuda_Layer *l, int n_cell, MNIST_Image *img, int target)
+void cuda_calc_cell_output(Cuda_Cell *c)
 {
-	cuda_set_cell_input(&l->cell[n_cell], img);
-//	calcCellOutput(c);
+	double *V3_H, *V3_D;
+	double sum = 0;
+
+	c->output=0;
+
+	printf("%d %d\n", THREAD_PER_BLOCK, BLOCK_PER_GRID);
+	V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
+	cudaMalloc((void **)&V3_D, BLOCK_PER_GRID*sizeof(double));
+
+	cudaDeviceSynchronize();
+	vectorDotProduct <<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>> (c->input, c->weight, V3_D);
+	cudaDeviceSynchronize();
+	cudaMemcpy(V3_H, V3_D, BLOCK_PER_GRID*sizeof(double), cudaMemcpyDeviceToHost);
+
+	for(int i = 0; i < BLOCK_PER_GRID; i++ )
+		sum += V3_H[i];
+
+	c->output = sum / c->n_inputs; // normalize output (0-1)
+	fprintf(stderr, "%s:: output %f %f\n", __func__, sum, c->output);
+}
+
+extern "C" int cuda_train_cell(Cuda_Layer *l, int n_cell, MNIST_Image *img, int target)
+{
+	int ret;
+	Cuda_Cell *c;
+	c = &l->cell[n_cell];
+	ret = cuda_set_cell_input(c, img);
+	if(ret) {
+		return -1;
+	}
+	cuda_calc_cell_output(c);
 //
 //	// learning (by updating the weights)
 //	double err = getCellError(c, target);
 //	updateCellWeights(c, err);
+	return 0;
 }
 
 extern "C" int copy_to_cuda(uint8_t *buf, int size)

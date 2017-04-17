@@ -26,7 +26,7 @@ struct Cuda_Vector{
 
 int copy_to_cuda(uint8_t *buf, int size);
 int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_cells);
-void cuda_train_cell(Cuda_Layer *l, int cell_n, MNIST_Image *img, int target);
+int cuda_train_cell(Cuda_Layer *l, int cell_n, MNIST_Image *img, int target);
 
 #ifdef __CUDACC__
 }

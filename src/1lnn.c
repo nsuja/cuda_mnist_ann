@@ -43,7 +43,8 @@ void initLayer(Layer *l){
 
 		for (int i=0; i<NUMBER_OF_INPUT_CELLS; i++){
 			l->cell[o].input[i]=0;
-			l->cell[o].weight[i]=rand()/(double)(RAND_MAX);
+			//l->cell[o].weight[i]=rand()/(double)(RAND_MAX);
+			l->cell[o].weight[i]=0.5;
 		}
 
 		l->cell[o].output = 0;
@@ -95,13 +96,16 @@ void setCellInput(Cell *c, MNIST_Image *img)
  */
 void calcCellOutput(Cell *c)
 {
+	double aux;
 	c->output=0;
 
 	for (int i=0; i<NUMBER_OF_INPUT_CELLS; i++){
 		c->output += c->input[i] * c->weight[i];
 	}
+	aux = c->output;
 
 	c->output /= NUMBER_OF_INPUT_CELLS;             // normalize output (0-1)
+	fprintf(stderr, "output %f %f\n", aux, c->output);
 }
 
 /**
