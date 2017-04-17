@@ -63,6 +63,20 @@ vectorAdd(const float *A, const float *B, float *C, int numElements)
 	}
 }
 
+	__global__ void
+vectorUpdateWeight(const double *input, double *weight, double err)
+{
+	int tid = blockDim.x * blockIdx.x + threadIdx.x;
+
+	if(tid < N) {
+		//printf("old weight[%d] %f\n", tid, weight[tid]);
+		weight[tid] += input[tid] * err * 0.05;
+		//printf("new weight[%d] %f\n", tid, weight[tid]);
+		tid += blockDim.x * gridDim.x;
+	}
+}
+
+
 __global__ void printInput(const double *V1, const int size)
 {
 	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
@@ -100,7 +114,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3)
 
 	if(chacheindex == 0) {
 		V3[blockIdx.x] = chache[0];
-		printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
+		//printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
 	}
 }
 
@@ -113,9 +127,10 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3)
 extern "C" int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_cells)
 {
 	cudaError_t err = cudaSuccess;
+	l->n_output = n_output_cells;
 	l->cell = (Cuda_Cell*)calloc(1, sizeof(Cuda_Cell) * n_output_cells);
-	l->cell->n_inputs = n_input_cells;
 	for(int i = 0; i < n_output_cells; i++) {
+		l->cell[i].n_inputs = n_input_cells;
 		err = cudaMalloc((void **)&l->cell[i].input, sizeof(double) * n_input_cells);
 		if (err != cudaSuccess) {
 			fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
@@ -135,7 +150,7 @@ extern "C" int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_ce
 	for (int o = 0; o < n_output_cells; o++){
 		for (int i = 0; i < n_input_cells; i++){
 			//TODO Inicializar en cuda
-			//l->cell[o].input[i]=0;
+			//l->cell[o].input[i] = 0;
 			//l->cell[o].weight[i]=rand()/(double)(RAND_MAX);
 			//aux[i] = rand()/(double)(RAND_MAX);
 			aux[i] = 0.5;
@@ -162,13 +177,16 @@ int cuda_set_cell_input(Cuda_Cell *c, MNIST_Image *img)
 	aux = (double*)malloc(c->n_inputs * sizeof(double));
 	for(int i=0; i < c->n_inputs; i++){
 		aux[i] = img->pixel[i] ? 1 : 0;
+		//printf("[%d]%f ", i, aux[i]);
 	}
+	//printf("\n");
 
 	err = cudaMemcpy(c->input, aux, c->n_inputs * sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
 		return -1;
 	}
+	//printInput<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(c->input, c->n_inputs);
 	free(aux);
 
 	return 0;
@@ -181,7 +199,7 @@ void cuda_calc_cell_output(Cuda_Cell *c)
 
 	c->output=0;
 
-	printf("%d %d\n", THREAD_PER_BLOCK, BLOCK_PER_GRID);
+	//printf("%d %d\n", THREAD_PER_BLOCK, BLOCK_PER_GRID);
 	V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
 	cudaMalloc((void **)&V3_D, BLOCK_PER_GRID*sizeof(double));
 
@@ -194,7 +212,24 @@ void cuda_calc_cell_output(Cuda_Cell *c)
 		sum += V3_H[i];
 
 	c->output = sum / c->n_inputs; // normalize output (0-1)
-	fprintf(stderr, "%s:: output %f %f\n", __func__, sum, c->output);
+	//fprintf(stderr, "%s:: output %f %f\n", __func__, sum, c->output);
+}
+
+/**
+ * @details Returns the difference between a target value and the cell's ouput
+ */
+double get_cell_error(Cuda_Cell *c, int target)
+{
+	double err = target - c->output;
+	return err;
+}
+
+/**
+ * @details Updates a cell's weights based on given error and LEARNING_RATE
+ */
+void update_cell_weights(Cuda_Cell *c, double err)
+{
+	vectorUpdateWeight<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>> (c->input, c->weight, err);
 }
 
 extern "C" int cuda_train_cell(Cuda_Layer *l, int n_cell, MNIST_Image *img, int target)
@@ -202,15 +237,17 @@ extern "C" int cuda_train_cell(Cuda_Layer *l, int n_cell, MNIST_Image *img, int 
 	int ret;
 	Cuda_Cell *c;
 	c = &l->cell[n_cell];
+	cudaDeviceSynchronize();
 	ret = cuda_set_cell_input(c, img);
 	if(ret) {
 		return -1;
 	}
 	cuda_calc_cell_output(c);
-//
-//	// learning (by updating the weights)
-//	double err = getCellError(c, target);
-//	updateCellWeights(c, err);
+
+	// learning (by updating the weights)
+	double err = get_cell_error(c, target);
+	update_cell_weights(c, err);
+	cudaDeviceSynchronize();
 	return 0;
 }
 
@@ -229,6 +266,21 @@ extern "C" int copy_to_cuda(uint8_t *buf, int size)
 		return -1;
 	}
 	return 0;
+}
+
+extern "C" int cuda_get_layer_prediction(Cuda_Layer *l)
+{
+	double maxOut = 0;
+	int maxInd = 0;
+
+	for (int i=0; i < l->n_output; i++){
+		if (l->cell[i].output > maxOut){
+			maxOut = l->cell[i].output;
+			maxInd = i;
+		}
+	}
+
+	return maxInd;
 }
 
 /**

@@ -105,13 +105,12 @@ void calcCellOutput(Cell *c)
 	aux = c->output;
 
 	c->output /= NUMBER_OF_INPUT_CELLS;             // normalize output (0-1)
-	fprintf(stderr, "output %f %f\n", aux, c->output);
+	//fprintf(stderr, "output %f %f\n", aux, c->output);
 }
 
 /**
  * @details Returns the difference between a target value and the cell's ouput
  */
-
 double getCellError(Cell *c, int target){
 
 	double err = target - c->output;
@@ -119,13 +118,9 @@ double getCellError(Cell *c, int target){
 	return err;
 }
 
-
-
-
 /**
  * @details Updates a cell's weights based on given error and LEARNING_RATE
  */
-
 void updateCellWeights(Cell *c, double err){
 
 	for (int i=0; i<NUMBER_OF_INPUT_CELLS; i++){

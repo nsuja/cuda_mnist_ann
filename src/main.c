@@ -49,15 +49,16 @@ void trainLayers(Layer *l, Cuda_Layer *cu_l)
 
 
 	// screen output for monitoring progress
-	//displayImageFrame(5,5);
+	displayImageFrame(5,5);
 
 	int errCount = 0;
+	int cu_errCount = 0;
 
 	// Loop through all images in the file
 	for (int imgCount=0; imgCount<MNIST_MAX_TRAINING_IMAGES; imgCount++){
 
 		// display progress
-		//displayLoadingProgressTraining(imgCount,3,5);
+		displayLoadingProgressTraining(imgCount,3,5);
 
 		// Reading next image and corresponding label
 		MNIST_Image img = getImage(imageFile);
@@ -72,22 +73,27 @@ void trainLayers(Layer *l, Cuda_Layer *cu_l)
 		Vector targetOutput;
 		targetOutput = getTargetOutput(lbl);
 
-		//displayImage(&img, 6,6);
+		displayImage(&img, 6,6);
 
 		// loop through all output cells for the given image
 		for (int i=0; i < NUMBER_OF_OUTPUT_CELLS; i++){
 			cuda_train_cell(cu_l, i, &img, targetOutput.val[i]);
 			trainCell(&l->cell[i], &img, targetOutput.val[i]);
-			exit(0);
 		}
 
 		int predictedNum = getLayerPrediction(l);
 		if (predictedNum!=lbl) errCount++;
 
+		int cu_predictedNum = cuda_get_layer_prediction(cu_l);
+		if (cu_predictedNum!=lbl) cu_errCount++;
+
 		printf("\n      Prediction: %d   Actual: %d ",predictedNum, lbl);
+		printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, lbl);
+
+		//getchar();
 
 		displayProgress(imgCount, errCount, 3, 66);
-
+		displayProgress(imgCount, cu_errCount, 50, 70);
 	}
 
 	// Close files

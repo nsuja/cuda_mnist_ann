@@ -14,19 +14,21 @@ typedef struct Cuda_Vector Cuda_Vector;
  * @brief The single (output) layer of this network (a layer is number cells)
  */
 struct Cuda_Layer{
-    Cuda_Cell *cell;
+	int n_output;
+	Cuda_Cell *cell;
 };
 
 /**
  * @brief Data structure containing defined number of integer values (the output vector contains values for 0-9)
  */
 struct Cuda_Vector{
-    int *val;
+	int *val;
 };
 
 int copy_to_cuda(uint8_t *buf, int size);
 int cuda_init_layer(Cuda_Layer *l, int n_input_cells, int n_output_cells);
 int cuda_train_cell(Cuda_Layer *l, int cell_n, MNIST_Image *img, int target);
+int cuda_get_layer_prediction(Cuda_Layer *l);
 
 #ifdef __CUDACC__
 }
