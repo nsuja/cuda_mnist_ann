@@ -25,85 +25,73 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "screen.h"
 #include "mnist-utils.h"
 #include "mnist-stats.h"
-#include "1lnn.h"
+#include "3lnn.h"
 
 #include "cuda_utils.h"
+
+#include "utils_queue.h"
+
+Utils_Queue *queue;
+
+void *read_thread(void *args);
 
 /**
  * @details Trains a layer by looping through and training its cells
  * @param l A pointer to the layer that is to be training
  */
-
-void trainLayers(Layer *l, Cuda_Layer *cu_l)
+void trainNetwork(Network *nn)
 {
 	int ret;
-	// open MNIST files
-	FILE *imageFile, *labelFile;
-	imageFile = openMNISTImageFile(MNIST_TRAINING_SET_IMAGE_FILE_NAME);
-	labelFile = openMNISTLabelFile(MNIST_TRAINING_SET_LABEL_FILE_NAME);
-
-
-	// screen output for monitoring progress
-	displayImageFrame(5,5);
+	int img_count = 0;
 
 	int errCount = 0;
 	int cu_errCount = 0;
 
-	// Loop through all images in the file
-	for (int imgCount=0; imgCount<MNIST_MAX_TRAINING_IMAGES; imgCount++){
+	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
+		MNIST_Packet *pkt;
 
-		// display progress
-		displayLoadingProgressTraining(imgCount,3,5);
-
-		// Reading next image and corresponding label
-		MNIST_Image img = getImage(imageFile);
-		MNIST_Label lbl = getLabel(labelFile);
-
-		ret = copy_to_cuda(img.pixel, 28*28);
-		if(ret) {
-			fprintf(stderr, "%s:: Algo salio mal en cuda", __func__);
+		pkt = utils_queue_get(queue);
+		if(!pkt) {
+			usleep(1000);
+			continue;
 		}
+		img_count ++;
 
-		// set target ouput of the number displayed in the current image (=label) to 1, all others to 0
-		Vector targetOutput;
-		targetOutput = getTargetOutput(lbl);
+		feedInput(nn, pkt->vec);
 
-		displayImage(&img, 6,6);
+		feedForwardNetwork(nn);
 
-		// loop through all output cells for the given image
-		for (int i=0; i < NUMBER_OF_OUTPUT_CELLS; i++){
-			cuda_train_cell(cu_l, i, &img, targetOutput.val[i]);
-			trainCell(&l->cell[i], &img, targetOutput.val[i]);
-		}
+		backPropagateNetwork(nn, pkt->label);
 
-		int predictedNum = getLayerPrediction(l);
-		if (predictedNum!=lbl) errCount++;
+		//displayImage(pkt->img, 6,6);
 
-		int cu_predictedNum = cuda_get_layer_prediction(cu_l);
-		if (cu_predictedNum!=lbl) cu_errCount++;
+		int classification = getNetworkClassification(nn);
+		if (classification != pkt->label) errCount++;
 
-		printf("\n      Prediction: %d   Actual: %d ",predictedNum, lbl);
-		printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, lbl);
+		int cu_predictedNum;
+		//cu_predictedNum = cuda_get_layer_prediction(cu_l);
+		//if(cu_predictedNum != pkt->label)
+		//	cu_errCount++;
 
+		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
+		//printf("\n      Prediction: %d   Actual: %d ",predictedNum, pkt->label);
+		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
 		//getchar();
 
-		displayProgress(imgCount, errCount, 3, 66);
-		displayProgress(imgCount, cu_errCount, 50, 70);
+        displayTrainingProgress(img_count, errCount, 3,5);
+
+		free(pkt->vec);
+		free(pkt);
 	}
-
-	// Close files
-	fclose(imageFile);
-	fclose(labelFile);
-
+	printf("\n TERMINEE\n");
 }
-
-
-
 
 /**
  * @details Tests a layer by looping through and testing its cells
@@ -111,46 +99,41 @@ void trainLayers(Layer *l, Cuda_Layer *cu_l)
  * @param l A pointer to the layer that is to be training
  */
 
-void testLayer(Layer *l){
+/**
+ * @brief Testing the trained network by processing the MNIST testing set WITHOUT updating weights
+ * @param nn A pointer to the NN
+ */
+
+void testNetwork(Network *nn){
 
 	// open MNIST files
 	FILE *imageFile, *labelFile;
 	imageFile = openMNISTImageFile(MNIST_TESTING_SET_IMAGE_FILE_NAME);
 	labelFile = openMNISTLabelFile(MNIST_TESTING_SET_LABEL_FILE_NAME);
 
-
-	// screen output for monitoring progress
-	displayImageFrame(7,5);
-
 	int errCount = 0;
 
 	// Loop through all images in the file
 	for (int imgCount=0; imgCount<MNIST_MAX_TESTING_IMAGES; imgCount++){
 
-		// display progress
-		displayLoadingProgressTesting(imgCount,5,5);
-
-		// Reading next image and corresponding label
+		// Reading next image and its corresponding label
 		MNIST_Image img = getImage(imageFile);
 		MNIST_Label lbl = getLabel(labelFile);
 
-		// set target ouput of the number displayed in the current image (=label) to 1, all others to 0
-		Vector targetOutput;
-		targetOutput = getTargetOutput(lbl);
+		// Convert the MNIST image to a standardized vector format and feed into the network
+		Vector *inpVector = getVectorFromImage(&img);
+		feedInput(nn, inpVector);
 
-		displayImage(&img, 8,6);
+		// Feed forward all layers (from input to hidden to output) calculating all nodes' output
+		feedForwardNetwork(nn);
 
-		// loop through all output cells for the given image
-		for (int i=0; i < NUMBER_OF_OUTPUT_CELLS; i++){
-			testCell(&l->cell[i], &img, targetOutput.val[i]);
-		}
+		// Classify image by choosing output cell with highest output
+		int classification = getNetworkClassification(nn);
+		if (classification!=lbl) errCount++;
 
-		int predictedNum = getLayerPrediction(l);
-		if (predictedNum!=lbl) errCount++;
-
-		printf("\n      Prediction: %d   Actual: %d ",predictedNum, lbl);
-
-		displayProgress(imgCount, errCount, 5, 66);
+		// Display progress during testing
+		displayTestingProgress(imgCount, errCount, 5,5);
+		//        displayImage(&img, lbl, classification, 7,6);
 
 	}
 
@@ -160,33 +143,76 @@ void testLayer(Layer *l){
 
 }
 
+void *read_thread(void *args)
+{
+	int reading = 1;
+	int img_count = 0;
+	FILE *imageFile, *labelFile;
+	imageFile = openMNISTImageFile(MNIST_TRAINING_SET_IMAGE_FILE_NAME);
+	labelFile = openMNISTLabelFile(MNIST_TRAINING_SET_LABEL_FILE_NAME);
+
+	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
+		MNIST_Packet *pkt;
+		if(utils_queue_get_count(queue) > 10000 && reading) {
+			reading = 0;
+		}
+		if(utils_queue_get_count(queue) < 50  && reading == 0) {
+			reading = 1;
+		}
+		if(!reading) {
+			usleep(1000);
+			continue;
+		}
+		img_count ++;
+
+		MNIST_Image img = getImage(imageFile);
+		MNIST_Label lbl = getLabel(labelFile);
+
+		pkt = calloc(1, sizeof(MNIST_Packet));
+		pkt->vec = getVectorFromImage(&img);
+		pkt->label = lbl;
+
+		utils_queue_insert(queue, (void *)pkt);
+	}
+
+	printf("\n Termine de leer.. meti %d \n", img_count);
+	fclose(imageFile);
+	fclose(labelFile);
+}
+
 /**
  * @details Main function to run MNIST-1LNN
  */
 
-int main(int argc, const char * argv[]) {
-
+int main(int argc, const char * argv[])
+{
 	// remember the time in order to calculate processing time at the end
 	time_t startTime = time(NULL);
+	pthread_t read_th;
 
 	// clear screen of terminal window
 	clearScreen();
 	printf("    MNIST-1LNN: a simple 1-layer neural network processing the MNIST handwriting images\n");
 
-	// initialize all connection weights to random values between 0 and 1
-	Layer outputLayer;
-	initLayer(&outputLayer);
+	queue = utils_queue_alloc();
+
+	//Inicio thread de lectura
+	pthread_create(&read_th, NULL, read_thread, NULL);
+
+	//Creo la red
+	Network *nn = createNetwork(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
+	Cuda_Network *cu_nn = cuda_create_network(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 
 	// inicializacion cuda
 	Cuda_Layer cuda_outputLayer;
-	if(cuda_init_layer(&cuda_outputLayer, NUMBER_OF_INPUT_CELLS, NUMBER_OF_OUTPUT_CELLS)) {
-		fprintf(stderr, "Error inicializando cuda layer\n");
-		return -1;
-	}
+//	if(cuda_init_layer(&cuda_outputLayer, NUMBER_OF_INPUT_CELLS, NUMBER_OF_OUTPUT_CELLS)) {
+//		fprintf(stderr, "Error inicializando cuda layer\n");
+//		return -1;
+//	}
 
-	trainLayers(&outputLayer, &cuda_outputLayer);
+	trainNetwork(nn);
 
-	testLayer(&outputLayer);
+	testNetwork(nn);
 
 	locateCursor(38, 5);
 
@@ -194,6 +220,8 @@ int main(int argc, const char * argv[]) {
 	time_t endTime = time(NULL);
 	double executionTime = difftime(endTime, startTime);
 	printf("\n    DONE! Total execution time: %.1f sec\n\n",executionTime);
+
+	pthread_join(read_th, NULL);
 
 	return 0;
 }

@@ -113,3 +113,42 @@ void displayProgress(int imgCount, int errCount, int y, int x){
     
 }
 
+
+/**
+ * @details Outputs reading progress while processing MNIST training images
+ */
+
+void displayTrainingProgress(int imgCount, int errCount, int y, int x){
+    
+    double progress = (double)(imgCount+1)/(double)(MNIST_MAX_TRAINING_IMAGES)*100;
+    
+    if (x!=0 && y!=0) locateCursor(y, x);
+    
+    printf("1: TRAINING: Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TRAINING_IMAGES,(int)progress);
+
+    
+    double accuracy = 1 - ((double)errCount/(double)(imgCount+1));
+    
+    printf("Result: Correct=%5d  Incorrect=%5d  Accuracy=%5.4f%% \n",imgCount+1-errCount, errCount, accuracy*100);
+    
+}
+
+
+
+void displayTestingProgress(int imgCount, int errCount, int y, int x){
+    
+    double progress = (double)(imgCount+1)/(double)(MNIST_MAX_TESTING_IMAGES)*100;
+    
+    if (x!=0 && y!=0) locateCursor(y, x);
+    
+    printf("2: TESTING:  Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TESTING_IMAGES,(int)progress);
+    
+    
+    double accuracy = 1 - ((double)errCount/(double)(imgCount+1));
+    
+    printf("Result: Correct=%5d  Incorrect=%5d  Accuracy=%5.4f%% \n",imgCount+1-errCount, errCount, accuracy*100);
+    
+}
+
+
+

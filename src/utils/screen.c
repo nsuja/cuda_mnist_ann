@@ -9,24 +9,16 @@
 #include <string.h>
 #include "screen.h"
 
-
-
-
 /**
  * @details Clear terminal screen by printing an escape sequence
  */
-
 void clearScreen(){
     printf("\e[1;1H\e[2J");
 }
 
-
-
-
 /**
  * @details Set text color in terminal by printing an escape sequence
  */
-
 void setColor(Color c){
     char esc[5];
     strcpy(esc, "0;00");    // default WHITE
@@ -47,13 +39,9 @@ void setColor(Color c){
     printf("%c[%sm",27,esc);
 }
 
-
-
-
 /**
  * @details Set cursor position to given coordinates in the terminal window
  */
-
 void locateCursor(const int row, const int col){
     printf("%c[%d;%dH",27,row,col);
 }

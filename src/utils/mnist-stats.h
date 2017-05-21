@@ -66,3 +66,19 @@ void displayLoadingProgressTesting(int imgCount, int y, int x);
  */
 
 void displayProgress(int imgCount, int errCount, int y, int x);
+
+/**
+ * @brief Outputs reading progress while processing MNIST training images
+ * @param imgCount Number of images already read from the MNIST file
+ * @param errCount Number of errors (images incorrectly classified)
+ * @param y Row of terminal screen
+ * @param x Column of terminal screen
+ */
+
+void displayTrainingProgress(int imgCount, int errCount, int y, int x);
+
+
+
+void displayTestingProgress(int imgCount, int errCount, int y, int x);
+
+

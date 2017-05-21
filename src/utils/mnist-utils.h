@@ -26,13 +26,26 @@
 
 
 
+typedef struct MNIST_Packet MNIST_Packet;
 typedef struct MNIST_ImageFileHeader MNIST_ImageFileHeader;
 typedef struct MNIST_LabelFileHeader MNIST_LabelFileHeader;
+typedef struct Vector Vector;
 
 typedef struct MNIST_Image MNIST_Image;
 typedef uint8_t MNIST_Label;
 
+/**
+ * @brief Dynamic data structure containing defined number of values
+ */
+struct Vector{
+	int size;
+	double vals[];
+};
 
+struct MNIST_Packet {
+	Vector *vec;
+	MNIST_Label label;
+};
 
 /**
  * @brief Data block defining a MNIST image
@@ -112,3 +125,5 @@ MNIST_Image getImage(FILE *imageFile);
  */
 
 MNIST_Label getLabel(FILE *labelFile);
+
+Vector *getVectorFromImage(MNIST_Image *img);
