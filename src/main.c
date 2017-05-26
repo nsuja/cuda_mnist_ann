@@ -46,7 +46,7 @@ void *read_thread(void *args);
  * @details Trains a layer by looping through and training its cells
  * @param l A pointer to the layer that is to be training
  */
-void trainNetwork(Network *nn)
+void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 {
 	int ret;
 	int img_count = 0;
@@ -65,6 +65,7 @@ void trainNetwork(Network *nn)
 		img_count ++;
 
 		feedInput(nn, pkt->vec);
+		cuda_feed_input(cu_nn, pkt->vec);
 
 		feedForwardNetwork(nn);
 
@@ -210,7 +211,7 @@ int main(int argc, const char * argv[])
 //		return -1;
 //	}
 
-	trainNetwork(nn);
+	trainNetwork(nn, cu_nn);
 
 	testNetwork(nn);
 
