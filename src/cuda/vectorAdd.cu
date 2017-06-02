@@ -17,6 +17,7 @@
  * of the programming guide with some additions like error checking.
  */
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
 
@@ -69,7 +70,6 @@ struct Cuda_Cell{
  * @brief Dynamic data structure modeling a neuron with a variable number of connections/weights
  */
 struct Cuda_Node {
-	double bias;
 	int wcount;
 	double *weights;
 };
@@ -79,6 +79,7 @@ struct Cuda_Node {
  */
 struct Cuda_Layer {
 	int n_output;
+	double *bias;
 	double *outputs;
 	Cuda_Node *nodes;
 };
@@ -168,6 +169,20 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3)
 	if(chacheindex == 0) {
 		V3[blockIdx.x] = chache[0];
 		//printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
+	}
+}
+
+__device__ __forceinline__ double sigmoid (double a)
+{
+	return 1.0 / (1.0 + exp (-a));
+}
+
+__global__ void sigmoid_kernel (const double * __restrict__ src, double * __restrict__ dst, int len)
+{
+	int stride = gridDim.x * blockDim.x;
+	int tid = blockDim.x * blockIdx.x + threadIdx.x;
+	for (int i = tid; i < len; i += stride) {
+		dst[i] = sigmoid (src[i]);
 	}
 }
 
@@ -306,8 +321,13 @@ Cuda_Layer *cuda_create_layer(int node_count, int weight_count)
 		return NULL;
 	}
 
+	err = cudaMalloc((void **)&layer->bias, sizeof(double) * node_count);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
+		return NULL;
+	}
+
 	for(int i = 0; i < node_count; i++) {
-		layer->nodes[i].bias = 0;
 		layer->nodes[i].wcount = weight_count;
 		layer->nodes[i].weights = (double *)calloc(1, sizeof(double) * weight_count);
 	}
@@ -380,26 +400,41 @@ Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
  */
 int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
+	cudaError_t err = cudaSuccess;
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 	Cuda_Node *n = NULL;
+	double *aux;
+
+	aux = (double*)malloc(l->n_output * sizeof(double));
+	if(!aux) {
+		fprintf(stderr, "Fallo malloc errno %d %s", errno, strerror(errno));
+		return -1;
+	}
 
 	for(int o = 0; o < l->n_output; o++) {
 		if(!n)
 			n = l->nodes;
+
+		aux[o] = rand()/(double)(RAND_MAX);
+		if(o%2)
+			aux[o] = -aux[o];  // make half of the bias weights negative
 
 		for(int i = 0; i < n->wcount; i++){
 			n->weights[i] = 0.7*(rand()/(double)(RAND_MAX));
 			if(i%2)
 				n->weights[i] = -n->weights[i];  // make half of the weights negative
 		}
-
-		// init bias weight
-		n->bias =  rand()/(double)(RAND_MAX);
-		if(o%2)
-			n->bias = -n->bias;  // make half of the bias weights negative
-
 		n++;
 	}
+
+	// init bias weight
+	err = cudaMemcpy(l->bias, aux, l->n_output * sizeof(double), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
+		free(aux);
+		return -1;
+	}
+	free(aux);
 
 	return 0;
 }
@@ -456,80 +491,78 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
  * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
  * @param id Sequential id of the node that is to be calculated
  */
+void activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
+{
+	Cuda_Layer *l = cuda_get_layer(nn, ltype);
+	//Cuda_Node *n = getNode(l, id);
 
-void activateNode(Network *nn, LayerType ltype, int id){
+	Cuda_Act_Func_Type actFct;
 
-	Layer *l = getLayer(nn, ltype);
-	Node *n = getNode(l, id);
+	if (ltype == CUDA_LAYER_HIDDEN)
+		actFct = nn->hid_layer_act_type;
+	else 
+		actFct = nn->out_layer_act_type;
 
-	ActFctType actFct;
+	if(actFct == CUDA_ACT_TANH)
+		fprintf(stderr, "No se implemento TANH, se fuerza sigmoide");
 
-	if (ltype==HIDDEN) actFct = nn->hidLayerActType;
-	else actFct = nn->outLayerActType;
+	sigmoid_kernel<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(l->outputs, l->outputs, l->n_output);
 
-	if (actFct==TANH)   n->output = tanh(n->output);
-	else n->output = 1 / (1 + (exp((double)-n->output)) );
-
+	//if (actFct==TANH)   n->output = tanh(n->output);
+	//else n->output = 1 / (1 + (exp((double)-n->output)) );
 }
-
-
-
 
 /**
  * @brief Calculates the output value of a specified node by multiplying all its weights with the previous layer's outputs
  * @param nn A pointer to the NN
  * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
- * @param id Sequential id of the node that is to be calculated
  */
 
-void calcNodeOutput(Network *nn, LayerType ltype, int id){
-
-	Layer *calcLayer = getLayer(nn, ltype);
-	Node *calcNode = getNode(calcLayer, id);
-
-	Layer *prevLayer;
-	int prevLayerNodeSize = 0;
-
-	if (ltype==HIDDEN) {
-		prevLayer = getLayer(nn, INPUT);
-		prevLayerNodeSize = nn->inpNodeSize;
+int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
+{
+	Cuda_Layer *prev_l, *cur_l;
+	switch (ltype) {
+		case CUDA_LAYER_INPUT:
+			fprintf(stderr, "Se pidio calcular output de input layer");
+			return -1;
+		case CUDA_LAYER_HIDDEN:
+			prev_l = nn->layers[0];
+			cur_l = nn->layers[1];
+			break;
+		case CUDA_LAYER_OUTPUT:
+			prev_l = nn->layers[1];
+			cur_l = nn->layers[2];
+			break;
+		default:
+			fprintf(stderr, "Layer invalida! %d", ltype);
+			return -1;
 	}
-	else {
-		prevLayer = getLayer(nn, HIDDEN);
-		prevLayerNodeSize = nn->hidNodeSize;
-	}
+	//FIXME Ver si esto funciona
+	cur_l->outputs = cur_l->bias;
 
-	uint8_t *sbptr = (uint8_t*) prevLayer->nodes;
-
-	// Start by adding the bias
-	calcNode->output = calcNode->bias;
-
-
-	for (int i=0; i<prevLayer->ncount;i++){
-		Node *prevLayerNode = (Node*)sbptr;
-		calcNode->output += prevLayerNode->output * calcNode->weights[i];
-		sbptr += prevLayerNodeSize;
-	}
-
-	double *V3_H, *V3_D;
+	double *V3_D;
 	double sum = 0;
 
-	c->output=0;
+	//cur_l->output=0;
 
 	//printf("%d %d\n", THREAD_PER_BLOCK, BLOCK_PER_GRID);
-	V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
+	//V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
 	cudaMalloc((void **)&V3_D, BLOCK_PER_GRID*sizeof(double));
 
 	cudaDeviceSynchronize();
-	vectorDotProduct <<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>> (c->input, c->weight, V3_D);
-	cudaDeviceSynchronize();
-	cudaMemcpy(V3_H, V3_D, BLOCK_PER_GRID*sizeof(double), cudaMemcpyDeviceToHost);
+	for (int i = 0; i < cur_l->n_output; i++){
+		vectorDotProduct<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, V3_D);
+		cudaDeviceSynchronize();
+		//cudaMemcpy(V3_H, V3_D, BLOCK_PER_GRID*sizeof(double), cudaMemcpyDeviceToHost);
 
-	for(int i = 0; i < BLOCK_PER_GRID; i++ )
-		sum += V3_H[i];
+		for(int j = 0; j < BLOCK_PER_GRID; j++ )
+			cur_l->outputs[i] += V3_D[j];
 
-	c->output = sum / c->n_inputs; // normalize output (0-1)
-	//fprintf(stderr, "%s:: output %f %f\n", __func__, sum, c->output);
+		//c->output = sum / c->n_inputs; // normalize output (0-1)
+		fprintf(stderr, "%s:: output %f %f\n", __func__, sum, cur_l->outputs[i]);
+	}
+
+	return 0;
 }
 
 /**
@@ -541,10 +574,11 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 
-	for(int i = 0; i < l->ncount; i++){
-		cuda_calc_node_output(nn, ltype, i);
-		cuda_activate_node(nn, ltype, i);
-	}
+	cuda_calc_node_output(nn, ltype);
+	//cuda_activate_node(nn, ltype);
+	//for(int i = 0; i < l->ncount; i++){
+	//	cuda_activate_node(nn, ltype, i);
+	//}
 }
 
 /**

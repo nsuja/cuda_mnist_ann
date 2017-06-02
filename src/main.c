@@ -205,7 +205,7 @@ int main(int argc, const char * argv[])
 	Cuda_Network *cu_nn = cuda_create_network(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 
 	// inicializacion cuda
-	Cuda_Layer cuda_outputLayer;
+	//Cuda_Layer cuda_outputLayer;
 //	if(cuda_init_layer(&cuda_outputLayer, NUMBER_OF_INPUT_CELLS, NUMBER_OF_OUTPUT_CELLS)) {
 //		fprintf(stderr, "Error inicializando cuda layer\n");
 //		return -1;
