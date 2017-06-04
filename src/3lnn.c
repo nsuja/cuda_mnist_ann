@@ -12,9 +12,6 @@
 #include "mnist-utils.h"
 #include "3lnn.h"
 
-
-
-
 /**
  * @details Retrieves a node via ID from a layer
  */
@@ -63,6 +60,30 @@ Layer *getLayer(Network *nn, LayerType ltype){
 	}
 
 	return l;
+}
+
+
+void printLayerStatus(Network *nn, LayerType ltype)
+{
+	int nodeSize = 0;
+	if (ltype==HIDDEN) nodeSize=nn->hidNodeSize;
+	else nodeSize=nn->outNodeSize;
+	Layer *l = getLayer(nn, ltype);
+
+	uint8_t *sbptr = (uint8_t*) l->nodes;
+
+	fprintf(stderr, "Layer %d: \n", ltype);
+	for (int o=0; o<l->ncount;o++){
+		Node *n = (Node *)sbptr;
+
+		fprintf(stderr, "Node %d: Bias %lf Weights: \n", o, n->bias);
+		for (int i=0; i<n->wcount; i++){
+			fprintf(stderr, "%1.6lf ", n->weights[i]);
+		}
+		fprintf(stderr, "\n");
+
+		sbptr += nodeSize;
+	}
 }
 
 
@@ -395,6 +416,8 @@ Layer *createLayer(int nodeCount, int weightCount){
 	// copy the default cell to all cell positions in the layer
 	for (int i=0;i<nodeCount;i++) memcpy(sbptr+(i*nodeSize),dn,nodeSize);
 
+	fprintf(stderr, "Cree Layer ncount %d nodeSize %d wcount %d\n", l->ncount, nodeSize, weightCount);
+
 	free(dn);
 
 	return l;
@@ -475,14 +498,9 @@ void initWeights(Network *nn, LayerType ltype){
 
 	uint8_t *sbptr = (uint8_t*) l->nodes;
 
+	srand(0);
 	for (int o=0; o<l->ncount;o++){
-
 		Node *n = (Node *)sbptr;
-
-		for (int i=0; i<n->wcount; i++){
-			n->weights[i] = 0.7*(rand()/(double)(RAND_MAX));
-			if (i%2) n->weights[i] = -n->weights[i];  // make half of the weights negative
-		}
 
 		// init bias weight
 		n->bias =  rand()/(double)(RAND_MAX);
@@ -490,6 +508,21 @@ void initWeights(Network *nn, LayerType ltype){
 
 		sbptr += nodeSize;
 	}
+
+	srand(0);
+	sbptr = (uint8_t*) l->nodes;
+	for (int o=0; o<l->ncount;o++){
+		Node *n = (Node *)sbptr;
+
+		for (int i=0; i<n->wcount; i++){
+			n->weights[i] = 0.7*(rand()/(double)(RAND_MAX));
+			if (i%2) n->weights[i] = -n->weights[i];  // make half of the weights negative
+		}
+
+		sbptr += nodeSize;
+	}
+
+	printLayerStatus(nn,ltype);
 
 }
 

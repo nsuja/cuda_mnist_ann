@@ -100,6 +100,10 @@ struct Cuda_Network{
 	Cuda_Layer **layers;
 };
 
+
+Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype);
+
+
 /**
  * CUDA Kernel Device code
  *
@@ -129,7 +133,6 @@ vectorUpdateWeight(const double *input, double *weight, double err)
 		tid += blockDim.x * gridDim.x;
 	}
 }
-
 
 __global__ void printInput(const double *V1, const int size)
 {
@@ -185,6 +188,30 @@ __global__ void sigmoid_kernel (const double * __restrict__ src, double * __rest
 		dst[i] = sigmoid (src[i]);
 	}
 }
+
+void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
+{
+	Cuda_Layer *l = cuda_get_layer(nn, ltype);
+
+	double *aux_bias = (double*)calloc(1, sizeof(double) * l->n_output);
+	cudaMemcpy(aux_bias, l->bias, sizeof(double) * l->n_output, cudaMemcpyDeviceToHost);
+
+	fprintf(stderr, "CUDA_Layer %d: \n");
+	for (int o=0; o<l->n_output;o++){
+		double *aux_weights = (double*)calloc(1, sizeof(double) * l->nodes[o].wcount);
+		cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
+
+		fprintf(stderr, "CUDA_Node %d: Bias %lf Weights: \n", o, aux_bias[o]);
+		for (int i=0; i<l->nodes->wcount; i++){
+			fprintf(stderr, "%1.6lf ", aux_weights[i]);
+		}
+		fprintf(stderr, "\n");
+		free(aux_weights);
+	}
+	free(aux_bias);
+}
+
+
 
 int cuda_set_cell_input(Cuda_Cell *c, MNIST_Image *img)
 {
@@ -329,7 +356,12 @@ Cuda_Layer *cuda_create_layer(int node_count, int weight_count)
 
 	for(int i = 0; i < node_count; i++) {
 		layer->nodes[i].wcount = weight_count;
-		layer->nodes[i].weights = (double *)calloc(1, sizeof(double) * weight_count);
+		err = cudaMalloc((void **)&layer->nodes[i].weights, sizeof(double) * weight_count);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "Failed to allocate input weight (error code %s)!\n", cudaGetErrorString(err));
+			//TODO Liberar y salir bien
+			return NULL;
+		}
 	}
 
 	return layer;
@@ -398,7 +430,7 @@ Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
  * @param nn A pointer to the NN
  * @param ltype Defining what layer to initialize
  */
-int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
+int cuda_layer_init_bias(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	cudaError_t err = cudaSuccess;
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
@@ -410,7 +442,7 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		fprintf(stderr, "Fallo malloc errno %d %s", errno, strerror(errno));
 		return -1;
 	}
-
+	srand(0);
 	for(int o = 0; o < l->n_output; o++) {
 		if(!n)
 			n = l->nodes;
@@ -418,16 +450,9 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		aux[o] = rand()/(double)(RAND_MAX);
 		if(o%2)
 			aux[o] = -aux[o];  // make half of the bias weights negative
-
-		for(int i = 0; i < n->wcount; i++){
-			n->weights[i] = 0.7*(rand()/(double)(RAND_MAX));
-			if(i%2)
-				n->weights[i] = -n->weights[i];  // make half of the weights negative
-		}
-		n++;
 	}
 
-	// init bias weight
+	// Copio BIAS
 	err = cudaMemcpy(l->bias, aux, l->n_output * sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
@@ -435,6 +460,47 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		return -1;
 	}
 	free(aux);
+
+	return 0;
+}
+
+
+int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
+{
+	cudaError_t err = cudaSuccess;
+	Cuda_Layer *l = cuda_get_layer(nn, ltype);
+	Cuda_Node *n = NULL;
+	double *aux;
+
+	srand(0);
+	for(int o = 0; o < l->n_output; o++) {
+		if(!n)
+			n = l->nodes;
+
+		aux = (double*)malloc(n->wcount * sizeof(double));
+		if(!aux) {
+			fprintf(stderr, "Fallo malloc errno %d %s", errno, strerror(errno));
+			return -1;
+		}
+
+		for(int i = 0; i < n->wcount; i++){
+			aux[i] = 0.7*(rand()/(double)(RAND_MAX));
+			if(i%2)
+				aux[i] = -aux[i];  // make half of the weights negative
+		}
+
+		// Copio weights
+		err = cudaMemcpy(n->weights, aux, n->wcount * sizeof(double), cudaMemcpyHostToDevice);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
+			return -1;
+		}
+
+		n++;
+	}
+	free(aux);
+
+	print_layer_status(nn,ltype);
 
 	return 0;
 }
@@ -477,6 +543,10 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
 
 	// Setting defaults
 	cuda_set_network_defaults(nn);
+
+	// Init connection bias with random values
+	cuda_layer_init_bias(nn, CUDA_LAYER_HIDDEN);
+	cuda_layer_init_bias(nn, CUDA_LAYER_OUTPUT);
 
 	// Init connection weights with random values
 	cuda_layer_init_weights(nn, CUDA_LAYER_HIDDEN);

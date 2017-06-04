@@ -84,9 +84,11 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
 		//printf("\n      Prediction: %d   Actual: %d ",predictedNum, pkt->label);
 		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
-		//getchar();
+		getchar();
 
-        displayTrainingProgress(img_count, errCount, 3,5);
+		//displayTrainingProgress(img_count, errCount, 3,5);
+
+
 
 		free(pkt->vec);
 		free(pkt);
