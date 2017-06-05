@@ -68,6 +68,7 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		cuda_feed_input(cu_nn, pkt->vec);
 
 		feedForwardNetwork(nn);
+		cuda_feed_forward_network(cu_nn);
 
 		backPropagateNetwork(nn, pkt->label);
 

@@ -17,6 +17,7 @@ int cuda_train_cell(Cuda_Layer *l, int cell_n, MNIST_Image *img, int target);
 int cuda_get_layer_prediction(Cuda_Layer *l);
 Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count);
 int cuda_feed_input(Cuda_Network *nn, Vector *v);
+void cuda_feed_forward_network(Cuda_Network *nn);
 
 #ifdef __CUDACC__
 }

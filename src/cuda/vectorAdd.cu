@@ -41,6 +41,12 @@
 #define CUDA_LEARNING_RATE_SIGMOID (0.004) //91.5%
 #define CUDA_LEARNING_RATE_TANH (0.2) //78%
 
+//XXX Para que funcione el atomic add
+#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600
+#else
+__device__ double atomicAdd(double* a, double b) { return b; }
+#endif
+
 typedef struct Cuda_Layer	 Cuda_Layer;
 typedef struct Cuda_Node	 Cuda_Node;
 
@@ -170,6 +176,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3)
 	}
 
 	if(chacheindex == 0) {
+		//atomicAdd(V3, chache[0]);
 		V3[blockIdx.x] = chache[0];
 		//printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
 	}
@@ -196,12 +203,15 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	double *aux_bias = (double*)calloc(1, sizeof(double) * l->n_output);
 	cudaMemcpy(aux_bias, l->bias, sizeof(double) * l->n_output, cudaMemcpyDeviceToHost);
 
+	double *aux_outputs = (double*)calloc(1, sizeof(double) * l->n_output);
+	cudaMemcpy(aux_outputs, l->outputs, sizeof(double) * l->n_output, cudaMemcpyDeviceToHost);
+
 	fprintf(stderr, "CUDA_Layer %d: \n");
 	for (int o=0; o<l->n_output;o++){
 		double *aux_weights = (double*)calloc(1, sizeof(double) * l->nodes[o].wcount);
 		cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
 
-		fprintf(stderr, "CUDA_Node %d: Bias %lf Weights: \n", o, aux_bias[o]);
+		fprintf(stderr, "CUDA_Node %d: Bias %lf Output %lf Weights: \n", o, aux_bias[o], aux_outputs[o]);
 		for (int i=0; i<l->nodes->wcount; i++){
 			fprintf(stderr, "%1.6lf ", aux_weights[i]);
 		}
@@ -500,7 +510,7 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	}
 	free(aux);
 
-	print_layer_status(nn,ltype);
+	//print_layer_status(nn,ltype);
 
 	return 0;
 }
@@ -611,25 +621,26 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	cur_l->outputs = cur_l->bias;
 
 	double *V3_D;
-	double sum = 0;
 
 	//cur_l->output=0;
 
 	//printf("%d %d\n", THREAD_PER_BLOCK, BLOCK_PER_GRID);
-	//V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
+	V3_H = (double *)calloc(1, sizeof(double) * BLOCK_PER_GRID);
 	cudaMalloc((void **)&V3_D, BLOCK_PER_GRID*sizeof(double));
 
 	cudaDeviceSynchronize();
 	for (int i = 0; i < cur_l->n_output; i++){
+		//vectorDotProduct<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &cur_l->outputs[i]);
 		vectorDotProduct<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, V3_D);
 		cudaDeviceSynchronize();
-		//cudaMemcpy(V3_H, V3_D, BLOCK_PER_GRID*sizeof(double), cudaMemcpyDeviceToHost);
+		cudaMemcpy(V3_H, V3_D, BLOCK_PER_GRID*sizeof(double), cudaMemcpyDeviceToHost);
 
-		for(int j = 0; j < BLOCK_PER_GRID; j++ )
-			cur_l->outputs[i] += V3_D[j];
+	//	vector_sum<<<BLOCK_PER_GRID, 1>>>(&cur_l->outputs[i], V3_D);
+	//	for(int j = 0; j < BLOCK_PER_GRID; j++ )
+	//		cur_l->outputs[i] += V3_D[j];
 
 		//c->output = sum / c->n_inputs; // normalize output (0-1)
-		fprintf(stderr, "%s:: output %f %f\n", __func__, sum, cur_l->outputs[i]);
+		//fprintf(stderr, "%s:: output %f %f\n", __func__, sum, cur_l->outputs[i]);
 	}
 
 	return 0;
@@ -645,6 +656,7 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 
 	cuda_calc_node_output(nn, ltype);
+	print_layer_status(nn,ltype);
 	//cuda_activate_node(nn, ltype);
 	//for(int i = 0; i < l->ncount; i++){
 	//	cuda_activate_node(nn, ltype, i);

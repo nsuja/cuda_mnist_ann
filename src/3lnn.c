@@ -76,7 +76,7 @@ void printLayerStatus(Network *nn, LayerType ltype)
 	for (int o=0; o<l->ncount;o++){
 		Node *n = (Node *)sbptr;
 
-		fprintf(stderr, "Node %d: Bias %lf Weights: \n", o, n->bias);
+		fprintf(stderr, "Node %d: Bias %lf Output %lf Weights: \n", o, n->bias, n->output);
 		for (int i=0; i<n->wcount; i++){
 			fprintf(stderr, "%1.6lf ", n->weights[i]);
 		}
@@ -311,10 +311,18 @@ void calcLayer(Network *nn, LayerType ltype){
 	Layer *l;
 	l = getLayer(nn, ltype);
 
+//	for (int i=0;i<l->ncount;i++){
+//		calcNodeOutput(nn, ltype, i);
+//		activateNode(nn,ltype,i);
+//	}
 	for (int i=0;i<l->ncount;i++){
 		calcNodeOutput(nn, ltype, i);
+	}
+	printLayerStatus(nn,ltype);
+	for (int i=0;i<l->ncount;i++){
 		activateNode(nn,ltype,i);
 	}
+	printLayerStatus(nn,ltype);
 }
 
 
@@ -522,7 +530,7 @@ void initWeights(Network *nn, LayerType ltype){
 		sbptr += nodeSize;
 	}
 
-	printLayerStatus(nn,ltype);
+	//printLayerStatus(nn,ltype);
 
 }
 
