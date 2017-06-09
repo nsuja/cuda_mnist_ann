@@ -195,9 +195,11 @@ endif
 
 CC=gcc
 RM=rm -f
+MKDIR=mkdir -p
 
 BIN_PATH=./bin/
 SRC_PATH=./src/
+DEBUG_PATH=./debug/
 
 CINCLUDE_PATH= -I$(SRC_PATH) \
 			   -I$(SRC_PATH)/utils/ \
@@ -226,18 +228,30 @@ LDFLAGS=-L/opt/cuda/lib64 -lcuda -lcudart -lstdc++ -lpthread -lm
 
 OUTPUT=cuda_mnist
 
-all: $(OUTPUT)
+all: $(BIN_PATH) $(BIN_PATH)/$(OUTPUT)
 
-$(OUTPUT): $(OBJECTS) $(CUDA_OBJECTS)
+valgrind: $(BIN_PATH)/$(OUTPUT) $(DEBUG_PATH)
+	valgrind --leak-check=full --leak-resolution=high  --log-file=$(DEBUG_PATH)/valgrind.log $(BIN_PATH)/$(OUTPUT)
+
+run_debug: $(BIN_PATH)/$(OUTPUT) $(DEBUG_PATH)
+	$(BIN_PATH)/$(OUTPUT) 1>$(DEBUG_PATH)/stdout.log 2>$(DEBUG_PATH)/stderr.log
+
+$(BIN_PATH)/$(OUTPUT): $(BIN_PATH) $(OBJECTS) $(CUDA_OBJECTS)
 	$(CC) -o "$@" $(OBJECTS) $(CUDA_OBJECTS) $(LDFLAGS) 
 
 $(OBJECTS): %.o : %.c
 	$(CC) $(CFLAGS) -o "$@" -c "$<"
-#$(EXEC) $(NVCC) $(CINCLUDE_PATH) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o "$@" -c "$<"
 
 $(CUDA_OBJECTS): %.o : %.cu
 	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
 
+$(DEBUG_PATH):
+	$(MKDIR) $(DEBUG_PATH)
+
+$(BIN_PATH):
+	$(MKDIR) $(BIN_PATH)
+
 clean:
-	- $(RM) $(OUTPUT)
+	- $(RM) -r $(BIN_PATH)
 	- $(RM) -r $(OBJECTS) $(CUDA_OBJECTS) *~ src/*~
+	- $(RM) -r $(DEBUG_PATH)
