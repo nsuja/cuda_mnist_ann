@@ -143,13 +143,14 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	double temp = 0;
 	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
 	unsigned int chacheindex = threadIdx.x ;
+	int stride = gridDim.x * blockDim.x;
 
 	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
 	while ( tid < size ) {
 		temp += V1[tid] * V2[tid] ;
 		if(log)
 			printf("(%d, %d, %d) tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, tid, V1[tid], V2[tid], temp);
-		tid += blockDim.x * gridDim.x;
+		tid += stride;
 	}
 
 	chache[chacheindex] = temp;
@@ -182,8 +183,8 @@ __global__ void sigmoid_kernel (const double * __restrict__ src, double * __rest
 {
 	int stride = gridDim.x * blockDim.x;
 	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-	for (int i = tid; i < len; i += stride) {
-		dst[i] = sigmoid (src[i]);
+	for (int i = tid + 1; i < len; i += stride) { //+1 para no activar el output de BIAS
+		dst[i] = sigmoid(src[i]);
 	}
 }
 
@@ -201,7 +202,7 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	double *aux_outputs = (double*)calloc(1, sizeof(double) * l->n_output + 1);
 	cudaMemcpy(aux_outputs, l->outputs, sizeof(double) * l->n_output, cudaMemcpyDeviceToHost);
 
-	fprintf(stderr, "CUDA_Layer %d: \n");
+	fprintf(stderr, "CUDA_Layer %d: \n", ltype);
 	for (int o=0; o<l->n_output - 1 ;o++){
 		double *aux_weights = (double*)calloc(1, sizeof(double) * l->nodes[o].wcount);
 		cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
@@ -498,10 +499,14 @@ _create_network_exit_error:
  * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
  * @param id Sequential id of the node that is to be calculated
  */
-void activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
+void cuda_activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
-	//Cuda_Node *n = getNode(l, id);
+	int n;
+	int blocks_per_grid;
+
+	n = l->n_output;
+	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 
 	Cuda_Act_Func_Type actFct;
 
@@ -513,10 +518,7 @@ void activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	if(actFct == CUDA_ACT_TANH)
 		fprintf(stderr, "No se implemento TANH, se fuerza sigmoide");
 
-	//sigmoid_kernel<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(l->outputs, l->outputs, l->n_output);
-
-	//if (actFct==TANH)   n->output = tanh(n->output);
-	//else n->output = 1 / (1 + (exp((double)-n->output)) );
+	sigmoid_kernel<<<blocks_per_grid, THREAD_PER_BLOCK>>>(l->outputs, l->outputs, l->n_output);
 }
 
 /**
@@ -561,17 +563,18 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	V3_H = (double *)calloc(1, sizeof(double) * blocks_per_grid);
 	cudaMalloc((void **)&V3_D, blocks_per_grid * sizeof(double));
 
-	fprintf(stderr, "A calcular output type %d\n", ltype);
+	fprintf(stdout, "A calcular output type %d\n", ltype);
 
 	cudaDeviceSynchronize();
 	for (int i = 0; i < cur_l->n_output - 1; i++){
-		fprintf(stderr, "output %d wcount %d prev_l cant %d BLOCK %d\n", i, cur_l->nodes[i].wcount, prev_l->n_output, blocks_per_grid);
-		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, ltype == CUDA_LAYER_HIDDEN);
+		fprintf(stdout, "output %d wcount %d prev_l cant %d BLOCK %d\n", i, cur_l->nodes[i].wcount, prev_l->n_output, blocks_per_grid);
+		//vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, ltype == CUDA_LAYER_HIDDEN);
+		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 1);
 		cudaDeviceSynchronize();
 		fprintf(stdout, "Output: ");
 		cuda_print_double(stdout, &(cur_l->outputs[i+1]));
 		fprintf(stdout, "\n");
-		print_layer_status(nn,ltype);
+		//print_layer_status(nn,ltype);
 
 		//c->output = sum / c->n_inputs; // normalize output (0-1)
 		//fprintf(stderr, "%s:: output %f %f\n", __func__, sum, cur_l->outputs[i]);
@@ -591,11 +594,15 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 
 	cuda_calc_node_output(nn, ltype);
-	print_layer_status(nn,ltype);
-	//cuda_activate_node(nn, ltype);
-	//for(int i = 0; i < l->ncount; i++){
-	//	cuda_activate_node(nn, ltype, i);
-	//}
+//	if(ltype == CUDA_LAYER_OUTPUT) {
+		fprintf(stderr, "Cuda_Calculando... %d: OUTPUT!\n", ltype);
+		print_layer_status(nn,ltype);
+//	}
+	cuda_activate_node(nn, ltype);
+//	if(ltype == CUDA_LAYER_OUTPUT) {
+		fprintf(stderr, "Cuda_Calculando... %d: ACTIVATED!\n", ltype);
+//		print_layer_status(nn,ltype);
+//	}
 }
 
 /**
@@ -604,8 +611,13 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
  */
 void cuda_feed_forward_network(Cuda_Network *nn)
 {
+	fprintf(stderr, "A calcular layer HIDDEN %d\n", CUDA_LAYER_HIDDEN);
 	cuda_calc_layer(nn, CUDA_LAYER_HIDDEN);
+	print_layer_status(nn, CUDA_LAYER_HIDDEN);
+
+	fprintf(stderr, "A calcular layer OUTPUT %d\n", CUDA_LAYER_OUTPUT);
 	cuda_calc_layer(nn, CUDA_LAYER_OUTPUT);
+	print_layer_status(nn, CUDA_LAYER_OUTPUT);
 }
 
 
