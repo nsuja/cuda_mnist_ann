@@ -228,6 +228,8 @@ LDFLAGS=-L/opt/cuda/lib64 -lcuda -lcudart -lstdc++ -lpthread -lm
 
 OUTPUT=cuda_mnist
 
+.PHONY: all valgrind run_debug
+
 all: $(BIN_PATH) $(BIN_PATH)/$(OUTPUT)
 
 valgrind: $(BIN_PATH)/$(OUTPUT) $(DEBUG_PATH)

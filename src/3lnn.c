@@ -272,6 +272,10 @@ void calcNodeOutput(Network *nn, LayerType ltype, int id){
 	Layer *calcLayer = getLayer(nn, ltype);
 	Node *calcNode = getNode(calcLayer, id);
 
+	int debugme = 0;
+	if(ltype == HIDDEN)
+		debugme = 1;
+
 	Layer *prevLayer;
 	int prevLayerNodeSize = 0;
 
@@ -293,7 +297,13 @@ void calcNodeOutput(Network *nn, LayerType ltype, int id){
 	for (int i=0; i<prevLayer->ncount;i++){
 		Node *prevLayerNode = (Node*)sbptr;
 		calcNode->output += prevLayerNode->output * calcNode->weights[i];
+		if(debugme) {
+			fprintf(stderr, "Node %d: i: %d prevout %lf weights: %lf \n", id, i, prevLayerNode->output, calcNode->weights[i]);
+		}
 		sbptr += prevLayerNodeSize;
+	}
+	if(debugme) {
+		fprintf(stderr, "Node %d: Output %lf\n", id, calcNode->output);
 	}
 
 }
@@ -318,11 +328,14 @@ void calcLayer(Network *nn, LayerType ltype){
 	for (int i=0;i<l->ncount;i++){
 		calcNodeOutput(nn, ltype, i);
 	}
-	printLayerStatus(nn,ltype);
+	if(ltype == HIDDEN) {
+		fprintf(stderr, "SADASDASDSDADSA OUTPUT\n");
+		printLayerStatus(nn,ltype);
+	}
 	for (int i=0;i<l->ncount;i++){
 		activateNode(nn,ltype,i);
 	}
-	printLayerStatus(nn,ltype);
+	//printLayerStatus(nn,ltype);
 }
 
 

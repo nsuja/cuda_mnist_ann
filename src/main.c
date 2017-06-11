@@ -64,10 +64,10 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		}
 		img_count ++;
 
-	//	feedInput(nn, pkt->vec);
+		feedInput(nn, pkt->vec);
 		cuda_feed_input(cu_nn, pkt->vec);
 
-		//	feedForwardNetwork(nn);
+		feedForwardNetwork(nn);
 		cuda_feed_forward_network(cu_nn);
 
 		backPropagateNetwork(nn, pkt->label);

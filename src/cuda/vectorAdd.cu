@@ -161,7 +161,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	while(i != 0) {
 		if(chacheindex < i)
 			chache[chacheindex] += chache[chacheindex + i];
-		if(log)
+		//if(log)
 			//printf("sum i %d Cache block %d th %d %f\n", i, blockIdx.x, threadIdx.x, chache[chacheindex]);
 
 		__syncthreads();
@@ -169,9 +169,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	}
 
 	if(chacheindex == 0) {
-		//atomicAdd(V3, chache[0]);
 		V3[blockIdx.x] = chache[0];
-		//printf("V3[%d] %f\n", blockIdx.x, V3[blockIdx.x]);
 	}
 }
 
@@ -568,7 +566,7 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	cudaDeviceSynchronize();
 	for (int i = 0; i < cur_l->n_output - 1; i++){
 		fprintf(stderr, "output %d wcount %d prev_l cant %d BLOCK %d\n", i, cur_l->nodes[i].wcount, prev_l->n_output, blocks_per_grid);
-		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, ltype == CUDA_LAYER_OUTPUT);
+		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, ltype == CUDA_LAYER_HIDDEN);
 		cudaDeviceSynchronize();
 		fprintf(stdout, "Output: ");
 		cuda_print_double(stdout, &(cur_l->outputs[i+1]));
