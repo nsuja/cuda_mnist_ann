@@ -188,6 +188,79 @@ __global__ void sigmoid_kernel (const double * __restrict__ src, double * __rest
 	}
 }
 
+__global__ void vectorGetErrSignal(const double *target, const double *cur_output, double *prev_output, double *cur_weights, const int size, int log)
+{
+	//Guarda la suma de cada thread
+	__shared__ double chache[THREAD_PER_BLOCK] ;
+	double temp = 0, deriv_val = 0, err_signal = 0;
+	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
+	unsigned int chacheindex = threadIdx.x ;
+	int stride = gridDim.x * blockDim.x;
+
+	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
+	for (int i = tid + 1; i < size; i += stride) { //+1 para no activar el output de BIAS
+		temp = target[i] - cur_output[i];
+		deriv_val = cur_output[i] * (1 - cur_output[i]);
+		err_signal = temp * deriv_val;
+
+		//i = updatenode..
+		//cur_weights[i] += CUDA_LEARNING_RATE_SIGMOID * prev_output[i] * err_signal;
+		cur_weights[0] += (nn->learningRate * 1 * err_signal);
+	}
+
+//	Layer *updateLayer = getLayer(nn, ltype);
+//	Node *updateNode = getNode(updateLayer, id);
+//
+//	Layer *prevLayer;
+//	int prevLayerNodeSize = 0;
+//	if (ltype==HIDDEN) {
+//		prevLayer = getLayer(nn, INPUT);
+//		prevLayerNodeSize = nn->inpNodeSize;
+//	} else {
+//		prevLayer = getLayer(nn, HIDDEN);
+//		prevLayerNodeSize = nn->hidNodeSize;
+//	}
+//
+//	uint8_t *sbptr = (uint8_t*) prevLayer->nodes;
+//
+//	for (int i=0; i<updateNode->wcount; i++){
+//		Node *prevLayerNode = (Node*)sbptr;
+//		updateNode->weights[i] += (nn->learningRate * prevLayerNode->output * error);
+//		sbptr += prevLayerNodeSize;
+//	}
+//
+//	// update bias weight
+//	updateNode->bias += (nn->learningRate * 1 * error);
+
+
+
+		if(log)
+			printf("(%d, %d, %d) tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, tid, target[tid], cur_output[tid], temp);
+		tid += stride;
+	}
+
+	chache[chacheindex] = temp;
+	__syncthreads(); //Espero a que todo termine
+
+	int i  = blockDim.x / 2 ;
+//	if(log)
+//		printf("i %d Cache block %d th %d %f\n", i, blockIdx.x, threadIdx.x, chache[chacheindex]);
+	while(i != 0) {
+		if(chacheindex < i)
+			chache[chacheindex] += chache[chacheindex + i];
+		//if(log)
+			//printf("sum i %d Cache block %d th %d %f\n", i, blockIdx.x, threadIdx.x, chache[chacheindex]);
+
+		__syncthreads();
+		i /= 2 ;
+	}
+
+	if(chacheindex == 0) {
+		V3[blockIdx.x] = chache[0];
+	}
+}
+
+
 void cuda_print_double(FILE * fp, double *value)
 {
 	double aux;
@@ -491,6 +564,174 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
 _create_network_exit_error:
 	fprintf(stderr, "Error en la inicializacion de la red\n");
 	return NULL;
+}
+
+/**
+ * @brief Returns the result of applying the given outputValue to the derivate of the activation function
+ * @param nn A pointer to the NN
+ * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
+ * @param outVal Output value that is to be back propagated
+ */
+double getActFctDerivative(Network *nn, LayerType ltype, double outVal){
+
+	double dVal = 0;
+	ActFctType actFct;
+
+	if (ltype==HIDDEN) actFct = nn->hidLayerActType;
+	else actFct = nn->outLayerActType;
+
+	if (actFct==TANH) dVal = 1-pow(tanh(outVal),2);
+	else dVal = outVal * (1-outVal);
+
+	return dVal;
+}
+
+
+
+
+/**
+ * @brief Updates a node's weights based on given error
+ * @param nn A pointer to the NN
+ * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
+ * @param id Sequential id of the node that is to be calculated
+ * @param error The error (difference between desired output and actual output
+ */
+
+void updateNodeWeights(Network *nn, LayerType ltype, int id, double error){
+
+	Layer *updateLayer = getLayer(nn, ltype);
+	Node *updateNode = getNode(updateLayer, id);
+
+	Layer *prevLayer;
+	int prevLayerNodeSize = 0;
+	if (ltype==HIDDEN) {
+		prevLayer = getLayer(nn, INPUT);
+		prevLayerNodeSize = nn->inpNodeSize;
+	} else {
+		prevLayer = getLayer(nn, HIDDEN);
+		prevLayerNodeSize = nn->hidNodeSize;
+	}
+
+	uint8_t *sbptr = (uint8_t*) prevLayer->nodes;
+
+	for (int i=0; i<updateNode->wcount; i++){
+		Node *prevLayerNode = (Node*)sbptr;
+		updateNode->weights[i] += (nn->learningRate * prevLayerNode->output * error);
+		sbptr += prevLayerNodeSize;
+	}
+
+	// update bias weight
+	updateNode->bias += (nn->learningRate * 1 * error);
+
+}
+
+/**
+ * @brief Back propagates network error to hidden layer
+ * @param nn A pointer to the NN
+ * @param targetClassification Correct classification (=label) of the input stream
+ */
+void backPropagateHiddenLayer(Network *nn, int targetClassification)
+{
+	Layer *ol = getLayer(nn, OUTPUT);
+	Layer *hl = getLayer(nn, HIDDEN);
+
+	for (int h=0;h<hl->ncount;h++) {
+		Node *hn = getNode(hl,h);
+
+		double outputcellerrorsum = 0;
+
+		//A cada nodo de la output lo comparo contra el valor esperado y saco el delta
+		//Puedo hacer una vectorial con un vector de esperado 00001000 y compararlo con los outs
+		//Multiplico por los pesos y saco el error de la Cell y lo acumulo
+		//Repito en hidden layer
+		//Updateo todos los pesos
+		for (int o=0;o<ol->ncount;o++) { 
+
+			Node *on = getNode(ol,o);
+
+			int targetOutput = (o==targetClassification)?1:0;
+
+			double errorDelta = targetOutput - on->output;
+			double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
+
+			outputcellerrorsum += errorSignal * on->weights[h];
+		}
+
+		double hiddenErrorSignal = outputcellerrorsum * getActFctDerivative(nn, HIDDEN, hn->output);
+
+		updateNodeWeights(nn, HIDDEN, h, hiddenErrorSignal);
+	}
+}
+
+/**
+ * @brief Back propagates network error in output layer
+ * @param nn A pointer to the NN
+ * @param targetClassification Correct classification (=label) of the input stream
+ */
+int cuda_back_propagate_output_layer(Network *nn, int target_class)
+{
+	uint8_t *dev_buf = NULL, *err_signal = NULL;
+	uint8_t *host_buf = NULL;
+	cudaError_t err = cudaSuccess;
+	int n;
+	int blocks_per_grid;
+	Cuda_Layer *ol;
+
+	n = l->n_output;
+	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
+	ol = cuda_get_layer(nn, CUDA_LAYER_OUTPUT);
+
+	err = cudaMalloc((void **)&err_signal, sizeof(double));
+
+	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (ol->n_output-1));
+	if(err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+	host_buf = calloc(1, sizeof(double) * (ol->n_output-1));
+
+	//Armo el vector
+	for(int i = 0; i < ol->n_output - 1; i++)
+		host_buf[i] = (i == target_class) ? 1:0;
+
+	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output-1), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
+		//XXX Liberar
+		return -1;
+	}
+
+	//Llamar a kernel para obtener signal de error y update de weights
+	vectorGetErrorSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n-1, 1);
+
+	{
+		Node *on = getNode(ol,o);
+
+		int targetOutput = (o==targetClassification)?1:0;
+		double errorDelta = targetOutput - on->output;
+		double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
+
+		updateNodeWeights(nn, OUTPUT, o, errorSignal);
+	}
+
+	err = cudaFree(dev_buf);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to free device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+	free(host_buf);
+}
+
+/**
+ * @brief Back propagates network error from output layer to hidden layer
+ * @param nn A pointer to the NN
+ * @param targetClassification Correct classification (=label) of the input stream
+ */
+void backPropagateNetwork(Network *nn, int targetClassification)
+{
+
+	backPropagateOutputLayer(nn, targetClassification);
+	backPropagateHiddenLayer(nn, targetClassification);
 }
 
 /**
