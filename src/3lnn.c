@@ -178,8 +178,10 @@ void backPropagateHiddenLayer(Network *nn, int targetClassification){
 			double errorDelta = targetOutput - on->output;
 			double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
 
+			printf("h %d o %d err_n %d.. %f %f %f temp %f\n", h, o, ol->ncount, errorSignal, on->weights[h], errorSignal * on->weights[h], outputcellerrorsum);
 			outputcellerrorsum += errorSignal * on->weights[h];
 		}
+		printf("summ %f\n", outputcellerrorsum);
 
 		double hiddenErrorSignal = outputcellerrorsum * getActFctDerivative(nn, HIDDEN, hn->output);
 
@@ -228,13 +230,17 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 void backPropagateNetwork(Network *nn, int targetClassification){
 
-	fprintf(stderr, "----Pre backpropagate!\n");
-	printLayerStatus(nn,OUTPUT);
+	//fprintf(stderr, "----Pre backpropagate!\n");
+	//printLayerStatus(nn,OUTPUT);
 	backPropagateOutputLayer(nn, targetClassification);
 	fprintf(stderr, "----Luego de backpropagate!\n");
 	printLayerStatus(nn,OUTPUT);
 
-	//backPropagateHiddenLayer(nn, targetClassification);
+	fprintf(stderr, "----Pre backpropagate HIDDEN!\n");
+	printLayerStatus(nn,HIDDEN);
+	backPropagateHiddenLayer(nn, targetClassification);
+	fprintf(stderr, "----Luego backpropagate HIDDEN!\n");
+	printLayerStatus(nn,HIDDEN);
 
 }
 
