@@ -173,7 +173,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	}
 }
 
-__global__ void vectorGetErrorSum(const double *err_signal, const double *weights, double *error_sum, const int size, const int err_n, int log)
+__global__ void vectorGetErrorSum(const double *err_signal, const double *weights, double *error_sum, const int size, const int weight_n, const int err_n, int log)
 {
 	//Guarda la suma de cada thread
 	double temp[1000] = {0};
@@ -182,11 +182,11 @@ __global__ void vectorGetErrorSum(const double *err_signal, const double *weight
 
 	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
 	for (int i = tid; i < size; i += stride) { //+1 para no activar el output de BIAS
-		if(i % err_n == 0)
+		if(i % weight_n == 0)
 			continue;
 		if(log)
-			printf("%s:: (%d, %d, %d) tid %d i %d(%d) err_n %d.. %f %f %f temp %f\n", __func__, blockDim.x, blockIdx.x, threadIdx.x, tid, i, i%err_n, err_n, err_signal[i%err_n], weights[i], err_signal[i%err_n]* weights[i], temp[i%err_n]);
-		error_sum[i%err_n] += err_signal[i%err_n] * weights[i];
+			printf("%s:: (%d, %d, %d) tid %d i %d(%d) err_n %d.. %f %f %f temp %f\n", __func__, blockDim.x, blockIdx.x, threadIdx.x, tid, i, i%weight_n, err_n, err_signal[(i/weight_n) + 1], weights[i], err_signal[(i/weight_n) + 1]* weights[i], error_sum[(i/weight_n) + 1]);
+		error_sum[(i%weight_n) + 1] += err_signal[(i/weight_n) + 1] * weights[i];
 	}
 }
 
@@ -625,9 +625,15 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	//Uso el primer elemento para acumular
 	for(int i = 1; i < ol->n_output - 1; i++)
 		host_buf[0] = 0;
-	cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output), cudaMemcpyHostToDevice);
+	err = cudaFree(dev_buf);
+	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (hl->n_output));
+	if(err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
 
-	vectorGetErrorSum<<<blocks_per_grid, THREAD_PER_BLOCK>>>(err_signal, super_weight_vector, dev_buf, n, ol->n_output, 1);
+
+	vectorGetErrorSum<<<blocks_per_grid, THREAD_PER_BLOCK>>>(err_signal, super_weight_vector, dev_buf, n, hl->n_output, ol->n_output, 1);
 	cuda_print_vector(stderr, "SUM ERROR", dev_buf, ol->n_output);
 
 
@@ -703,7 +709,7 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 
 	//Llamar a kernel para obtener signal de error y update de weights
 	//Internamente saltea el primer elemento
-	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 1);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 0);
 	cuda_print_vector(stderr, "ERROR VECTOR", err_signal, n);
 
 	n = hl->n_output;
@@ -711,7 +717,7 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 
 	//TODO Ver de actualizar todo.. vectorizar
 	for(int i = 1; i < ol->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &err_signal[i], n, 1);
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &err_signal[i], n, 0);
 	}
 
 	err = cudaFree(err_signal);
@@ -736,8 +742,8 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
  */
 void cuda_backpropagate_network(Cuda_Network *nn, int target_class)
 {
-	fprintf(stderr, "----CUDA Pre backpropagate!\n");
-	print_layer_status(nn, CUDA_LAYER_OUTPUT);
+	//fprintf(stderr, "----CUDA Pre backpropagate!\n");
+	//print_layer_status(nn, CUDA_LAYER_OUTPUT);
 	cuda_backpropagate_output_layer(nn, target_class);
 	fprintf(stderr, "----CUDA Luego de backpropagate!\n");
 	print_layer_status(nn, CUDA_LAYER_OUTPUT);

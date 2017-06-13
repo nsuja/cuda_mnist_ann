@@ -211,7 +211,7 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 		double errorDelta = targetOutput - on->output;
 		double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
-		fprintf(stderr, "Errsignal %d ... %1.6f\n", o, errorSignal);
+		//fprintf(stderr, "Errsignal %d ... %1.6f\n", o, errorSignal);
 
 		updateNodeWeights(nn, OUTPUT, o, errorSignal);
 
@@ -230,8 +230,8 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 void backPropagateNetwork(Network *nn, int targetClassification){
 
-	fprintf(stderr, "----Pre backpropagate!\n");
-	printLayerStatus(nn,OUTPUT);
+	//fprintf(stderr, "----Pre backpropagate!\n");
+	//printLayerStatus(nn,OUTPUT);
 	backPropagateOutputLayer(nn, targetClassification);
 	fprintf(stderr, "----Luego de backpropagate!\n");
 	printLayerStatus(nn,OUTPUT);
