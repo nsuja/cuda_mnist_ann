@@ -230,8 +230,8 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 void backPropagateNetwork(Network *nn, int targetClassification){
 
-	//fprintf(stderr, "----Pre backpropagate!\n");
-	//printLayerStatus(nn,OUTPUT);
+	fprintf(stderr, "----Pre backpropagate!\n");
+	printLayerStatus(nn,OUTPUT);
 	backPropagateOutputLayer(nn, targetClassification);
 	fprintf(stderr, "----Luego de backpropagate!\n");
 	printLayerStatus(nn,OUTPUT);

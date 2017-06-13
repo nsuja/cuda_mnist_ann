@@ -276,8 +276,8 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
 
 		fprintf(stderr, "CUDA_Node %d: Bias %lf Output %lf Weights: \n", o, aux_weights[0], aux_outputs[o+1]);
 		if(ltype != CUDA_LAYER_HIDDEN) {
-			for (int i=0; i<l->nodes->wcount; i++){
-				fprintf(stderr, "%s %01.06lf", i == 0 ? "BIAS" : "", aux_weights[i]);
+			for (int i=1; i<l->nodes->wcount; i++){
+				fprintf(stderr, "%01.06lf ", aux_weights[i]);
 			}
 			fprintf(stderr, "\n");
 		}
@@ -604,7 +604,7 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	//Armo el vector
 	host_buf[0] = 0;
 	for(int i = 1; i < ol->n_output - 1; i++)
-		host_buf[i] = (i == target_class) ? 1:0;
+		host_buf[i] = (i == target_class+1) ? 1:0;
 
 	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
@@ -692,7 +692,7 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 	//Armo el vector
 	host_buf[0] = 0;
 	for(int i = 1; i < ol->n_output - 1; i++)
-		host_buf[i] = (i == target_class) ? 1:0;
+		host_buf[i] = (i == target_class+1) ? 1:0;
 
 	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
@@ -703,15 +703,15 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 
 	//Llamar a kernel para obtener signal de error y update de weights
 	//Internamente saltea el primer elemento
-	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 0);
-	//cuda_print_vector(stderr, "ERROR VECTOR", err_signal, n);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 1);
+	cuda_print_vector(stderr, "ERROR VECTOR", err_signal, n);
 
 	n = hl->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 
 	//TODO Ver de actualizar todo.. vectorizar
 	for(int i = 1; i < ol->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &err_signal[i], n, 0);
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &err_signal[i], n, 1);
 	}
 
 	err = cudaFree(err_signal);
@@ -736,8 +736,8 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
  */
 void cuda_backpropagate_network(Cuda_Network *nn, int target_class)
 {
-	//fprintf(stderr, "----CUDA Pre backpropagate!\n");
-	//print_layer_status(nn, CUDA_LAYER_OUTPUT);
+	fprintf(stderr, "----CUDA Pre backpropagate!\n");
+	print_layer_status(nn, CUDA_LAYER_OUTPUT);
 	cuda_backpropagate_output_layer(nn, target_class);
 	fprintf(stderr, "----CUDA Luego de backpropagate!\n");
 	print_layer_status(nn, CUDA_LAYER_OUTPUT);
