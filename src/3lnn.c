@@ -78,9 +78,9 @@ void printLayerStatus(Network *nn, LayerType ltype)
 
 		fprintf(stderr, "Node %d: Bias %lf Output %lf Weights: \n", o, n->bias, n->output);
 		for (int i=0; i<n->wcount; i++){
-			//fprintf(stderr, "%1.6lf ", n->weights[i]);
+			fprintf(stderr, "%01.06lf ", n->weights[i]);
 		}
-		//fprintf(stderr, "\n");
+		fprintf(stderr, "\n");
 
 		sbptr += nodeSize;
 	}
@@ -140,6 +140,7 @@ void updateNodeWeights(Network *nn, LayerType ltype, int id, double error){
 
 	for (int i=0; i<updateNode->wcount; i++){
 		Node *prevLayerNode = (Node*)sbptr;
+		printf("i %d, RATE %f prev %f err %f .. off %f ... weight %f\n", i, nn->learningRate, prevLayerNode->output, error, (nn->learningRate * prevLayerNode->output * error), updateNode->weights[i]);
 		updateNode->weights[i] += (nn->learningRate * prevLayerNode->output * error);
 		sbptr += prevLayerNodeSize;
 	}
@@ -208,6 +209,7 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 		double errorDelta = targetOutput - on->output;
 		double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
+		fprintf(stderr, "Errsignal %d ... %1.6f\n", o, errorSignal);
 
 		updateNodeWeights(nn, OUTPUT, o, errorSignal);
 
@@ -226,9 +228,13 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 void backPropagateNetwork(Network *nn, int targetClassification){
 
+	fprintf(stderr, "----Pre backpropagate!\n");
+	printLayerStatus(nn,OUTPUT);
 	backPropagateOutputLayer(nn, targetClassification);
+	fprintf(stderr, "----Luego de backpropagate!\n");
+	printLayerStatus(nn,OUTPUT);
 
-	backPropagateHiddenLayer(nn, targetClassification);
+	//backPropagateHiddenLayer(nn, targetClassification);
 
 }
 

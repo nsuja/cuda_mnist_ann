@@ -71,6 +71,7 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		cuda_feed_forward_network(cu_nn);
 
 		backPropagateNetwork(nn, pkt->label);
+		cuda_backpropagate_network(cu_nn, pkt->label);
 
 		//displayImage(pkt->img, 6,6);
 
