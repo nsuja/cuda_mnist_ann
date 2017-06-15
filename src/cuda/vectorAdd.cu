@@ -176,7 +176,9 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 __global__ void vectorGetErrorSum(const double *err_signal, const double *weights, double *error_sum, const int size, const int weight_n, const int err_n, int log)
 {
 	//Guarda la suma de cada thread
-	double temp[1000] = {0};
+	__shared__ double cache[THREAD_PER_BLOCK] ;
+	double temp = 0;
+	double out[THREAD_PER_BLOCK] = {0};
 	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
 	int stride = gridDim.x * blockDim.x;
 
@@ -185,9 +187,40 @@ __global__ void vectorGetErrorSum(const double *err_signal, const double *weight
 		if(i % weight_n == 0)
 			continue;
 		if(log)
-			printf("%s:: (%d, %d, %d) tid %d i %d(%d) err_n %d.. %f %f %f temp %f\n", __func__, blockDim.x, blockIdx.x, threadIdx.x, tid, i, i%weight_n, err_n, err_signal[(i/weight_n) + 1], weights[i], err_signal[(i/weight_n) + 1]* weights[i], error_sum[(i/weight_n) + 1]);
-		error_sum[(i%weight_n) + 1] += err_signal[(i/weight_n) + 1] * weights[i];
+			printf("%s:: (%d, %d, %d) tid %d i %d(%d) err_n %d.. %f %f %f temp %f\n", __func__, blockDim.x, blockIdx.x, threadIdx.x, tid, i, i%weight_n, err_n, err_signal[(i/weight_n) + 1], weights[i], err_signal[(i/weight_n) + 1]* weights[i], error_sum[(i%weight_n) + 1]);
+
+		temp += err_signal[(i/weight_n) + 1] * weights[i];
+		//error_sum[(i%weight_n) + 1] += err_signal[(i/weight_n) + 1] * weights[i];
 	}
+
+	cache[threadIdx.x] = temp; //Guardo los resultados de todos los threads en una shared
+	__syncthreads(); //Espero a que todo termine
+
+	if(tid < size)
+		printf("%s:: ..(%d, %d, %d) thidx %d tid %d (%d) err_n %d.. %f %f %f temp %f\n", __func__, blockDim.x, blockIdx.x, threadIdx.x, threadIdx.x, tid, tid%weight_n, err_n, err_signal[(tid/weight_n) + 1], weights[tid], err_signal[(tid/weight_n) + 1]* weights[tid], cache[threadIdx.x]);
+
+	int i  = size / 2 ;
+	int offset = 0;
+	if(tid < size)
+		printf("tid %d Cache block %d th %d %f\n", threadIdx.x, blockIdx.x, threadIdx.x, cache[threadIdx.x]);
+	while(i >= weight_n) {
+		if(i%weight_n == 0) {
+			offset = 0;
+		} else {
+			offset = weight_n - i%weight_n;
+		}
+		if(threadIdx.x < (i-i%weight_n))
+			cache[threadIdx.x] += cache[threadIdx.x+i+offset];
+
+		__syncthreads();
+		if(threadIdx.x < (i-i%weight_n))
+			printf("i %d Cache block %d off %d .. %d %d %f\n", i, blockIdx.x, offset, threadIdx.x, threadIdx.x+i+offset, cache[threadIdx.x]);
+
+		i = (i+offset)/2;
+	}
+
+	if(threadIdx.x < weight_n)
+		error_sum[threadIdx.x] = cache[threadIdx.x];
 }
 
 
@@ -262,7 +295,7 @@ void cuda_print_double(FILE * fp, double *value)
 	fprintf(fp, "%lf", aux);
 }
 
-void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
+void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype, int print_weights)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 
@@ -275,7 +308,7 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
 
 		fprintf(stderr, "CUDA_Node %d: Bias %lf Output %lf Weights: \n", o, aux_weights[0], aux_outputs[o+1]);
-		if(ltype != CUDA_LAYER_HIDDEN) {
+		if(print_weights) {
 			for (int i=1; i<l->nodes->wcount; i++){
 				fprintf(stderr, "%01.06lf ", aux_weights[i]);
 			}
@@ -567,7 +600,7 @@ _create_network_exit_error:
  */
 int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 {
-	double *dev_buf = NULL, *err_signal = NULL, *super_weight_vector = NULL;
+	double *dev_buf = NULL, *err_signal = NULL, *super_weight_vector = NULL, *hid_err_signal = NULL;
 	double *host_buf = NULL;
 	cudaError_t err = cudaSuccess;
 	int n;
@@ -620,32 +653,39 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 1);
 	//Ya arme la err_signal
 
-	n = (ol->n_output - 1) * ol->nodes[0].wcount;
-	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-	//Uso el primer elemento para acumular
-	for(int i = 1; i < ol->n_output - 1; i++)
-		host_buf[0] = 0;
+
+	free(host_buf);
+	host_buf = (double *)calloc(1, sizeof(double) * (hl->n_output));
+	for(int i = 0; i < hl->n_output; i++)
+		host_buf[i] = 0;
 	err = cudaFree(dev_buf);
 	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (hl->n_output));
 	if(err != cudaSuccess) {
 		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
 		return -1;
 	}
+	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (hl->n_output), cudaMemcpyHostToDevice);
 
 
+	n = (ol->n_output - 1) * ol->nodes[0].wcount;
+	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 	vectorGetErrorSum<<<blocks_per_grid, THREAD_PER_BLOCK>>>(err_signal, super_weight_vector, dev_buf, n, hl->n_output, ol->n_output, 1);
-	cuda_print_vector(stderr, "SUM ERROR", dev_buf, ol->n_output);
+	cuda_print_vector(stderr, "SUM ERROR", dev_buf, hl->n_output);
 
-
-	//Cargar hid_err_signal 
-	//double hiddenErrorSignal = outputcellerrorsum * getActFctDerivative(nn, HIDDEN, hn->output);
-
-//	//Update de weights con hid_err_signal
-//	n = il->n_output;
-//	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-//	for(int i = 1; i < ol->n_output; i++) {
-//		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->nodes[i-1].weights, il->outputs, hiderr_signal[i], n, 1);
-//	}
+	err = cudaMalloc((void **)&hid_err_signal, sizeof(double) * (hl->n_output));
+	if(err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate device vector error signal (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+	n = hl->n_output;
+	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, hl->outputs, hid_err_signal, n, 1);
+	//Update de weights con hid_err_signal
+	n = il->n_output;
+	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
+	for(int i = 1; i < hl->n_output; i++) {
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->nodes[i-1].weights, il->outputs, &hid_err_signal[i], n, 1);
+	}
 
 	err = cudaFree(err_signal);
 	if (err != cudaSuccess) {
@@ -743,16 +783,16 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 void cuda_backpropagate_network(Cuda_Network *nn, int target_class)
 {
 	//fprintf(stderr, "----CUDA Pre backpropagate!\n");
-	//print_layer_status(nn, CUDA_LAYER_OUTPUT);
+	//print_layer_status(nn, CUDA_LAYER_OUTPUT, 1);
 	cuda_backpropagate_output_layer(nn, target_class);
 	fprintf(stderr, "----CUDA Luego de backpropagate!\n");
-	print_layer_status(nn, CUDA_LAYER_OUTPUT);
+	print_layer_status(nn, CUDA_LAYER_OUTPUT, 1);
 
 	fprintf(stderr, "----CUDA Pre backpropagate!\n");
-	print_layer_status(nn, CUDA_LAYER_HIDDEN);
+	print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 	cuda_backpropagate_hidden_layer(nn, target_class);
 	fprintf(stderr, "----CUDA Luego de backpropagate!\n");
-	print_layer_status(nn, CUDA_LAYER_HIDDEN);
+	print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 }
 
 /**
@@ -858,12 +898,12 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	cuda_calc_node_output(nn, ltype);
 //	if(ltype == CUDA_LAYER_OUTPUT) {
 		fprintf(stderr, "Cuda_Calculando... %d: OUTPUT!\n", ltype);
-		print_layer_status(nn,ltype);
+		print_layer_status(nn,ltype, 0);
 //	}
 	cuda_activate_node(nn, ltype);
 //	if(ltype == CUDA_LAYER_OUTPUT) {
 		fprintf(stderr, "Cuda_Calculando... %d: ACTIVATED!\n", ltype);
-//		print_layer_status(nn,ltype);
+//		print_layer_status(nn,ltype, 0);
 //	}
 }
 
@@ -875,11 +915,11 @@ void cuda_feed_forward_network(Cuda_Network *nn)
 {
 	fprintf(stderr, "A calcular layer HIDDEN %d\n", CUDA_LAYER_HIDDEN);
 	cuda_calc_layer(nn, CUDA_LAYER_HIDDEN);
-	print_layer_status(nn, CUDA_LAYER_HIDDEN);
+	print_layer_status(nn, CUDA_LAYER_HIDDEN, 0);
 
 	fprintf(stderr, "A calcular layer OUTPUT %d\n", CUDA_LAYER_OUTPUT);
 	cuda_calc_layer(nn, CUDA_LAYER_OUTPUT);
-	print_layer_status(nn, CUDA_LAYER_OUTPUT);
+	print_layer_status(nn, CUDA_LAYER_OUTPUT, 1);
 }
 
 
