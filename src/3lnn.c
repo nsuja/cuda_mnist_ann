@@ -140,7 +140,7 @@ void updateNodeWeights(Network *nn, LayerType ltype, int id, double error){
 
 	for (int i=0; i<updateNode->wcount; i++){
 		Node *prevLayerNode = (Node*)sbptr;
-		printf("i %d, RATE %f prev %f err %f .. off %f ... weight %f\n", i, nn->learningRate, prevLayerNode->output, error, (nn->learningRate * prevLayerNode->output * error), updateNode->weights[i]);
+		//printf("i %d, RATE %f prev %f err %f .. off %f ... weight %f\n", i, nn->learningRate, prevLayerNode->output, error, (nn->learningRate * prevLayerNode->output * error), updateNode->weights[i]);
 		updateNode->weights[i] += (nn->learningRate * prevLayerNode->output * error);
 		sbptr += prevLayerNodeSize;
 	}
@@ -178,14 +178,16 @@ void backPropagateHiddenLayer(Network *nn, int targetClassification){
 			double errorDelta = targetOutput - on->output;
 			double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
 
-			printf("h %d o %d err_n %d.. %f %f %f temp %f\n", h, o, ol->ncount, errorSignal, on->weights[h], errorSignal * on->weights[h], outputcellerrorsum);
+			//printf("h %d o %d err_n %d.. %f %f %f temp %f\n", h, o, ol->ncount, errorSignal, on->weights[h], errorSignal * on->weights[h], outputcellerrorsum);
 			outputcellerrorsum += errorSignal * on->weights[h];
 		}
-		printf("summ %f\n", outputcellerrorsum);
+		//printf("summ %f\n", outputcellerrorsum);
 
 		double hiddenErrorSignal = outputcellerrorsum * getActFctDerivative(nn, HIDDEN, hn->output);
+		//printf("hidden %f %f %f\n", outputcellerrorsum, getActFctDerivative(nn, HIDDEN, hn->output), hiddenErrorSignal);
 
 		updateNodeWeights(nn, HIDDEN, h, hiddenErrorSignal);
+		//printLayerStatus(nn,HIDDEN);
 	}
 
 }
@@ -211,7 +213,7 @@ void backPropagateOutputLayer(Network *nn, int targetClassification){
 
 		double errorDelta = targetOutput - on->output;
 		double errorSignal = errorDelta * getActFctDerivative(nn, OUTPUT, on->output);
-		//fprintf(stderr, "Errsignal %d ... %1.6f\n", o, errorSignal);
+		//fprintf(stderr, "Errsignal %d ... %f %f %f\n", o, errorDelta, getActFctDerivative(nn, OUTPUT, on->output), errorSignal);
 
 		updateNodeWeights(nn, OUTPUT, o, errorSignal);
 
@@ -233,14 +235,14 @@ void backPropagateNetwork(Network *nn, int targetClassification){
 	//fprintf(stderr, "----Pre backpropagate!\n");
 	//printLayerStatus(nn,OUTPUT);
 	backPropagateOutputLayer(nn, targetClassification);
-	fprintf(stderr, "----Luego de backpropagate!\n");
-	printLayerStatus(nn,OUTPUT);
+	//fprintf(stderr, "----Luego de backpropagate!\n");
+	//printLayerStatus(nn,OUTPUT);
 
-	fprintf(stderr, "----Pre backpropagate HIDDEN!\n");
-	printLayerStatus(nn,HIDDEN);
+	//fprintf(stderr, "----Pre backpropagate HIDDEN!\n");
+	//printLayerStatus(nn,HIDDEN);
 	backPropagateHiddenLayer(nn, targetClassification);
-	fprintf(stderr, "----Luego backpropagate HIDDEN!\n");
-	printLayerStatus(nn,HIDDEN);
+	//fprintf(stderr, "----Luego backpropagate HIDDEN!\n");
+	//printLayerStatus(nn,HIDDEN);
 
 }
 
@@ -285,8 +287,6 @@ void calcNodeOutput(Network *nn, LayerType ltype, int id){
 	Node *calcNode = getNode(calcLayer, id);
 
 	int debugme = 0;
-	//if(ltype == HIDDEN)
-		debugme = 1;
 
 	Layer *prevLayer;
 	int prevLayerNodeSize = 0;
@@ -337,15 +337,15 @@ void calcLayer(Network *nn, LayerType ltype){
 		calcNodeOutput(nn, ltype, i);
 	}
 //	if(ltype == OUTPUT) {
-		fprintf(stderr, "Calculando... %d: OUTPUT!\n", ltype);
-		printLayerStatus(nn,ltype);
+		//fprintf(stderr, "Calculando... %d: OUTPUT!\n", ltype);
+		//printLayerStatus(nn,ltype);
 //	}
 	for (int i=0;i<l->ncount;i++){
 		activateNode(nn,ltype,i);
 	}
 //	if(ltype == OUTPUT) {
-		fprintf(stderr, "Calculando... %d: ACTIVATED!\n", ltype);
-		printLayerStatus(nn,ltype);
+		//fprintf(stderr, "Calculando... %d: ACTIVATED!\n", ltype);
+		//printLayerStatus(nn,ltype);
 //	}
 }
 

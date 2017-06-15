@@ -19,6 +19,7 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count);
 int cuda_feed_input(Cuda_Network *nn, Vector *v);
 void cuda_feed_forward_network(Cuda_Network *nn);
 void cuda_backpropagate_network(Cuda_Network *nn, int target_class);
+int cuda_get_network_classification(Cuda_Network *nn);
 
 #ifdef __CUDACC__
 }

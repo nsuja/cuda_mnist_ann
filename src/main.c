@@ -64,31 +64,34 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		}
 		img_count ++;
 
+
+		//fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
+
 		feedInput(nn, pkt->vec);
-		cuda_feed_input(cu_nn, pkt->vec);
+		//cuda_feed_input(cu_nn, pkt->vec);
 
 		feedForwardNetwork(nn);
-		cuda_feed_forward_network(cu_nn);
+		//cuda_feed_forward_network(cu_nn);
 
 		backPropagateNetwork(nn, pkt->label);
-		cuda_backpropagate_network(cu_nn, pkt->label);
+		//cuda_backpropagate_network(cu_nn, pkt->label);
 
 		//displayImage(pkt->img, 6,6);
 
 		int classification = getNetworkClassification(nn);
 		if (classification != pkt->label) errCount++;
 
-		int cu_predictedNum;
-		//cu_predictedNum = cuda_get_layer_prediction(cu_l);
-		//if(cu_predictedNum != pkt->label)
-		//	cu_errCount++;
+		//int cu_predictedNum;
+		//cu_predictedNum = cuda_get_network_classification(cu_nn);
+		//if(cu_predictedNum != pkt->label) cu_errCount++;
 
 		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
-		//printf("\n      Prediction: %d   Actual: %d ",predictedNum, pkt->label);
+		//printf("\n      Prediction: %d   Actual: %d ",classification, pkt->label);
 		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
-		getchar();
+		//getchar();
 
-		//displayTrainingProgress(img_count, errCount, 3,5);
+		displayTrainingProgress(img_count, errCount, 3,5);
+		//displayTrainingProgress(img_count, cu_errCount, 13,5);
 
 
 
