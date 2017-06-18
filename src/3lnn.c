@@ -370,7 +370,6 @@ void feedForwardNetwork(Network *nn){
  * @param nn A pointer to the NN
  * @param v A pointer to a vector
  */
-
 void feedInput(Network *nn, Vector *v) {
 
 	Layer *il;
@@ -385,6 +384,21 @@ void feedInput(Network *nn, Vector *v) {
 		iln++;               // @warning This only works because inputNodeSize = sizeof(Node)
 	}
 
+}
+
+void feedInputFixed(Network *nn, uint8_t *v, int size) {
+
+	Layer *il;
+	il = nn->layers;
+
+	Node *iln;
+	iln = il->nodes;
+
+	// Copy the vector content to the "output" field of the input layer nodes
+	for (int i=0; i < size; i++){
+		iln->output = v[i];
+		iln++;               // @warning This only works because inputNodeSize = sizeof(Node)
+	}
 }
 
 

@@ -83,3 +83,4 @@ int getNetworkClassification(Network *nn);
 
 void displayNetworkWeightsForDebugging(Network *nn);
 
+void feedInputFixed(Network *nn, uint8_t *v, int size);

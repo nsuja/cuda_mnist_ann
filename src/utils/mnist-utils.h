@@ -127,3 +127,6 @@ MNIST_Image getImage(FILE *imageFile);
 MNIST_Label getLabel(FILE *labelFile);
 
 Vector *getVectorFromImage(MNIST_Image *img);
+
+int loadInputData(MNIST_Image *img, double *inp);
+int loadInputDataU8(MNIST_Image *img, uint8_t *inp);

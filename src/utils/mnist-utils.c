@@ -185,3 +185,31 @@ Vector *getVectorFromImage(MNIST_Image *img)
 	return v;
 }
 
+/**
+ * @brief Returns a Vector holding the image pixels of a given MNIST image
+ * @param img A pointer to a MNIST image
+ */
+int loadInputData(MNIST_Image *img, double *inp)
+{
+	int size;
+
+	size = MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT;
+	for (int i=0; i < size; i++) {
+		inp[i] = img->pixel[i] ? 1 : 0;
+	}
+
+	return 0;
+}
+
+int loadInputDataU8(MNIST_Image *img, uint8_t *inp)
+{
+	int size;
+
+	size = MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT;
+	for (int i=0; i < size; i++) {
+		inp[i] = img->pixel[i] ? 1 : 0;
+	}
+
+	return 0;
+}
+

@@ -37,8 +37,13 @@
 #include "cuda_utils.h"
 
 #include "utils_queue.h"
+#include "utils_time.h"
 
 Utils_Queue *queue;
+
+uint8_t *input_data_u8;
+double *input_data;
+uint8_t *input_labels;
 
 void *read_thread(void *args);
 
@@ -53,52 +58,73 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 
 	int errCount = 0;
 	int cu_errCount = 0;
+	uint64_t ts;
+
+	uint64_t ts1, ts2, ts3, ts4, ts5, ts6;
+	ts1 = ts2 = ts3 = ts4 = ts5 = ts6 = 0;
+
+	//Para separar de la inicializacion
 
 	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
-		MNIST_Packet *pkt;
+		//fprintf(stdout, "==== IMAGEN NUMERO %d\n", img_count);
 
-		pkt = utils_queue_get(queue);
-		if(!pkt) {
-			usleep(1000);
-			continue;
-		}
-		img_count ++;
+		ts = get_time_usec();
+		feedInputFixed(nn, &input_data_u8[img_count * (784+1)], 784);
+		ts1 += get_time_usec() - ts;
+		printf("ts1:: %llu feed_input\n", get_time_usec() - ts);
 
+		ts = get_time_usec();
+		cuda_feed_input_from_super_input(cu_nn, img_count);
+		ts2 += get_time_usec() - ts;
+		printf("ts2:: %llu cuda_feed_input\n", get_time_usec() - ts);
 
-		//fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
-
-		feedInput(nn, pkt->vec);
-		//cuda_feed_input(cu_nn, pkt->vec);
-
+		ts = get_time_usec();
 		feedForwardNetwork(nn);
-		//cuda_feed_forward_network(cu_nn);
+		ts3 += get_time_usec() - ts;
+		//printf("ts3:: %llu feed_forward\n", get_time_usec() - ts);
 
-		backPropagateNetwork(nn, pkt->label);
-		//cuda_backpropagate_network(cu_nn, pkt->label);
+		ts = get_time_usec();
+		cuda_feed_forward_network(cu_nn);
+		ts4 += get_time_usec() - ts;
+		//printf("ts4:: %llu cuda_feed_forward\n", get_time_usec() - ts);
+
+		ts = get_time_usec();
+		backPropagateNetwork(nn, input_labels[img_count]);
+		ts5 += get_time_usec() - ts;
+		//printf("ts5:: %llu backpropagation\n", get_time_usec() - ts);
+
+		ts = get_time_usec();
+		cuda_backpropagate_network(cu_nn, input_labels[img_count]);
+		ts6 += get_time_usec() - ts;
+		//printf("ts6:: %llu cuda backpropagation\n", get_time_usec() - ts);
 
 		//displayImage(pkt->img, 6,6);
 
 		int classification = getNetworkClassification(nn);
-		if (classification != pkt->label) errCount++;
+		if (classification != input_labels[img_count]) errCount++;
 
-		//int cu_predictedNum;
-		//cu_predictedNum = cuda_get_network_classification(cu_nn);
-		//if(cu_predictedNum != pkt->label) cu_errCount++;
+		int cu_predictedNum;
+		cu_predictedNum = cuda_get_network_classification(cu_nn);
+		if(cu_predictedNum != input_labels[img_count]) cu_errCount++;
 
 		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
 		//printf("\n      Prediction: %d   Actual: %d ",classification, pkt->label);
 		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
 		//getchar();
 
+
 		displayTrainingProgress(img_count, errCount, 3,5);
-		//displayTrainingProgress(img_count, cu_errCount, 13,5);
+		displayTrainingProgress(img_count, cu_errCount, 13,5);
 
-
-
-		free(pkt->vec);
-		free(pkt);
+		img_count ++;
 	}
 	printf("\n TERMINEE\n");
+	printf("ts1:: %lf %llu %d\n", (double)ts1/(double)img_count, ts1, img_count);
+	printf("ts2:: %lf %llu %d\n", (double)ts2/(double)img_count, ts2, img_count);
+	printf("ts3:: %lf %llu %d\n", (double)ts3/(double)img_count, ts3, img_count);
+	printf("ts4:: %lf %llu %d\n", (double)ts4/(double)img_count, ts4, img_count);
+	printf("ts5:: %lf %llu %d\n", (double)ts5/(double)img_count, ts5, img_count);
+	printf("ts6:: %lf %llu %d\n", (double)ts6/(double)img_count, ts6, img_count);
 }
 
 /**
@@ -151,6 +177,33 @@ void testNetwork(Network *nn){
 
 }
 
+void *read_data(void)
+{
+	int reading = 1;
+	int img_count = 0;
+	FILE *imageFile, *labelFile;
+	imageFile = openMNISTImageFile(MNIST_TRAINING_SET_IMAGE_FILE_NAME);
+	labelFile = openMNISTLabelFile(MNIST_TRAINING_SET_LABEL_FILE_NAME);
+
+	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
+		MNIST_Image img = getImage(imageFile);
+		MNIST_Label lbl = getLabel(labelFile);
+
+		input_data[img_count] = 1; //BIAS
+		input_data_u8[img_count] = 1; //BIAS
+		loadInputData(&img, &input_data[img_count * (28 * 28 + 1)]);
+		loadInputDataU8(&img, &input_data_u8[img_count * (28 * 28 + 1)]);
+		input_labels[img_count] = (uint8_t)lbl;
+
+		img_count ++;
+	}
+
+	printf("\n Termine de leer.. meti %d \n", img_count);
+	fclose(imageFile);
+	fclose(labelFile);
+}
+
+
 void *read_thread(void *args)
 {
 	int reading = 1;
@@ -196,7 +249,6 @@ int main(int argc, const char * argv[])
 {
 	// remember the time in order to calculate processing time at the end
 	time_t startTime = time(NULL);
-	pthread_t read_th;
 
 	// clear screen of terminal window
 	clearScreen();
@@ -204,19 +256,24 @@ int main(int argc, const char * argv[])
 
 	queue = utils_queue_alloc();
 
+	input_data_u8 = (uint8_t *)calloc(1, 60000 * (28 * 28 + 1));
+	input_data = (double *)calloc(1, sizeof(double) * 60000 * (28 * 28 + 1));
+	input_labels = (uint8_t *)calloc(1, 60000);
+
 	//Inicio thread de lectura
-	pthread_create(&read_th, NULL, read_thread, NULL);
+	uint64_t ts = get_time_usec();
+	read_data();
+	printf("LECTURA DE DATOS:: %llu\n", get_time_usec() - ts);
 
 	//Creo la red
 	Network *nn = createNetwork(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 	Cuda_Network *cu_nn = cuda_create_network(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 
-	// inicializacion cuda
-	//Cuda_Layer cuda_outputLayer;
-//	if(cuda_init_layer(&cuda_outputLayer, NUMBER_OF_INPUT_CELLS, NUMBER_OF_OUTPUT_CELLS)) {
-//		fprintf(stderr, "Error inicializando cuda layer\n");
-//		return -1;
-//	}
+	sleep(1);
+	uint64_t ts1 = get_time_usec();
+	cuda_copy_to_super_input(cu_nn, input_data);
+	printf("COPIA A SUPER INPUT:: %llu\n", get_time_usec() - ts1);
+	exit(0);
 
 	trainNetwork(nn, cu_nn);
 
@@ -228,8 +285,6 @@ int main(int argc, const char * argv[])
 	time_t endTime = time(NULL);
 	double executionTime = difftime(endTime, startTime);
 	printf("\n    DONE! Total execution time: %.1f sec\n\n",executionTime);
-
-	pthread_join(read_th, NULL);
 
 	return 0;
 }

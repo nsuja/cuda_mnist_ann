@@ -209,6 +209,7 @@ OBJECTS=$(SRC_PATH)/utils/mnist-utils.o \
 		$(SRC_PATH)/utils/mnist-stats.o \
 		$(SRC_PATH)/utils/screen.o \
 		$(SRC_PATH)/utils/utils_queue.o \
+		$(SRC_PATH)/utils/utils_time.o \
 		$(SRC_PATH)/3lnn.o \
 		$(SRC_PATH)/main.o
 
@@ -219,6 +220,7 @@ HEADERS=$(SRC_PATH)/utils/mnist-utils.h \
 		$(SRC_PATH)/utils/mnist-stats.h \
 		$(SRC_PATH)/utils/screen.h \
 		$(SRC_PATH)/utils/utils_queue.h \
+		$(SRC_PATH)/utils/utils_time.h \
 		$(SRC_PATH)/3lnn.h \
 		$(SRC_PATH)/cuda/cuda_utils.h
 

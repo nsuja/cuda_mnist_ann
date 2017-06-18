@@ -27,6 +27,10 @@
 #include <helper_cuda.h>
 
 #include "cuda_utils.h"
+#include <sys/time.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <unistd.h>
 
 #define MIN(x,y) (x < y ? x:y)
 
@@ -100,12 +104,20 @@ struct Cuda_Network{
 	double learning_rate;         ///< Factor by which connection weight changes are applied
 	Cuda_Act_Func_Type hid_layer_act_type;
 	Cuda_Act_Func_Type out_layer_act_type;
+	double *super_input;
 	Cuda_Layer **layers;
 };
 
 
+int cuda_init_super_input(Cuda_Network *nn);
 Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype);
 
+uint64_t cu_get_time_usec()
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec * 1000000ULL + tv.tv_usec;
+}
 
 /**
  * CUDA Kernel Device code
@@ -485,21 +497,21 @@ int cuda_layer_init_outputs(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 	double *aux;
 
-	aux = (double*)calloc(1, l->n_output * sizeof(double));
-	if(!aux) {
-		fprintf(stderr, "Fallo malloc errno %d %s\n", errno, strerror(errno));
-		return -1;
-	}
-	aux[0] = 1.0;
+	//aux = (double*)calloc(1, l->n_output * sizeof(double));
+	//if(!aux) {
+	//	fprintf(stderr, "Fallo malloc errno %d %s\n", errno, strerror(errno));
+	//	return -1;
+	//}
+	//aux[0] = 1.0;
 
-	// Copio Vector de salida
-	err = cudaMemcpy(l->outputs, aux, sizeof(double) * l->n_output, cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
-		free(aux);
-		return -1;
-	}
-	free(aux);
+	//// Copio Vector de salida
+	//err = cudaMemcpy(l->outputs, aux, sizeof(double) * l->n_output, cudaMemcpyHostToDevice);
+	//if (err != cudaSuccess) {
+	//	fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
+	//	free(aux);
+	//	return -1;
+	//}
+	//free(aux);
 
 	return 0;
 }
@@ -600,6 +612,8 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
 
 	// Setting defaults
 	cuda_set_network_defaults(nn);
+
+	cuda_init_super_input(nn);
 
 	// Init connection bias with random values
 	ret = cuda_layer_init_bias(nn, CUDA_LAYER_HIDDEN);
@@ -959,11 +973,13 @@ int cuda_feed_input(Cuda_Network *nn, Vector *v)
 	Cuda_Layer *il;
 	il = nn->layers[0]; //Layer 0 es la input
 
+	uint64_t ts = cu_get_time_usec();
 	err = cudaMemcpy(&(il->outputs[1]), v->vals, v->size * sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
 		return -1;
 	}
+	printf("%s:: time to copy %llu\n", __func__, cu_get_time_usec() - ts);
 
 	//printInput<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(c->input, c->n_inputs);
 
@@ -1009,6 +1025,50 @@ int cuda_get_network_classification(Cuda_Network *nn)
 	cuda_free(dev_ind, -1);
 
 	return host_ind;
+}
+
+int cuda_init_super_input(Cuda_Network *nn)
+{
+	cudaError_t err = cudaSuccess;
+	double *dev_max;
+	err = cudaMalloc((void **)&nn->super_input, sizeof(double) * (784+1) * 60000);
+	if(err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate device vector dev_max (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+
+	return 0;
+}
+
+int cuda_copy_to_super_input(Cuda_Network *nn, double *input_data)
+{
+	cudaError_t err = cudaSuccess;
+
+	err = cudaMemcpy(nn->super_input, input_data, sizeof(double) * 60000 * (784 + 1), cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
+		return -1;
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Feeds some Vector data into the INPUT layer of the NN
+ * @param nn A pointer to the NN
+ * @param v A pointer to a vector
+ */
+int cuda_feed_input_from_super_input(Cuda_Network *nn, int i)
+{
+	cudaError_t err = cudaSuccess;
+	Cuda_Layer *il = cuda_get_layer(nn, CUDA_LAYER_INPUT);
+
+	//XXX Leak del primer output!!
+	il->outputs = nn->super_input + (i * (784+1));
+
+	//printInput<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(c->input, c->n_inputs);
+
+	return 0;
 }
 
 
