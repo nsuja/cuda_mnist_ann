@@ -67,7 +67,7 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 	sleep(1);
 
 	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
-		fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
+		//fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
 
 		ts = get_time_usec();
 		feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
@@ -143,14 +143,15 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
  * @param nn A pointer to the NN
  */
 
-void testNetwork(Network *nn){
-
+void testNetwork(Network *nn, Cuda_Network *cu_nn)
+{
 	// open MNIST files
 	FILE *imageFile, *labelFile;
 	imageFile = openMNISTImageFile(MNIST_TESTING_SET_IMAGE_FILE_NAME);
 	labelFile = openMNISTLabelFile(MNIST_TESTING_SET_LABEL_FILE_NAME);
 
 	int errCount = 0;
+	int cu_errCount = 0;
 
 	// Loop through all images in the file
 	for (int imgCount=0; imgCount<MNIST_MAX_TESTING_IMAGES; imgCount++){
@@ -162,16 +163,23 @@ void testNetwork(Network *nn){
 		// Convert the MNIST image to a standardized vector format and feed into the network
 		Vector *inpVector = getVectorFromImage(&img);
 		feedInput(nn, inpVector);
+		cuda_feed_input(cu_nn, inpVector);
 
 		// Feed forward all layers (from input to hidden to output) calculating all nodes' output
 		feedForwardNetwork(nn);
+		cuda_feed_forward_network(cu_nn);
 
 		// Classify image by choosing output cell with highest output
 		int classification = getNetworkClassification(nn);
 		if (classification!=lbl) errCount++;
 
+		int cu_predictedNum;
+		cu_predictedNum = cuda_get_network_classification(cu_nn);
+		if(cu_predictedNum != lbl) cu_errCount++;
+
 		// Display progress during testing
 		displayTestingProgress(imgCount, errCount, 5,5);
+		displayTestingProgress(imgCount, cu_errCount, 15,5);
 
 	}
 
@@ -267,7 +275,7 @@ int main(int argc, const char * argv[])
 	//Inicio thread de lectura
 	uint64_t ts = get_time_usec();
 	read_data();
-	printf("LECTURA DE DATOS:: %llu\n", get_time_usec() - ts);
+	//printf("LECTURA DE DATOS:: %llu\n", get_time_usec() - ts);
 
 	//Creo la red
 	Network *nn = createNetwork(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
@@ -279,7 +287,7 @@ int main(int argc, const char * argv[])
 
 	trainNetwork(nn, cu_nn);
 
-	testNetwork(nn);
+	testNetwork(nn, cu_nn);
 
 	locateCursor(38, 5);
 

@@ -463,7 +463,7 @@ Layer *createLayer(int nodeCount, int weightCount){
 	// copy the default cell to all cell positions in the layer
 	for (int i=0;i<nodeCount;i++) memcpy(sbptr+(i*nodeSize),dn,nodeSize);
 
-	fprintf(stderr, "Cree Layer ncount %d nodeSize %d wcount %d\n", l->ncount, nodeSize, weightCount);
+	//fprintf(stderr, "Cree Layer ncount %d nodeSize %d wcount %d\n", l->ncount, nodeSize, weightCount);
 
 	free(dn);
 

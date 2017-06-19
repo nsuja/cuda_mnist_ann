@@ -587,7 +587,7 @@ int cuda_layer_init_bias(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		fprintf(stderr, "Fallo malloc errno %d %s", errno, strerror(errno));
 		return -1;
 	}
-	srand(0);
+	srand(time(NULL));
 	for(int o = 0; o < l->n_output; o++) {
 		aux[o] = rand()/(double)(RAND_MAX);
 		if(o%2)
@@ -620,7 +620,7 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	Cuda_Node *n = NULL;
 	double *aux;
 
-	srand(0);
+	srand(time(NULL));
 	for(int o = 0; o < l->n_output - 1; o++) {
 		if(!n)
 			n = l->nodes;
@@ -956,13 +956,13 @@ int cuda_feed_input(Cuda_Network *nn, Vector *v)
 	Cuda_Layer *il;
 	il = nn->layers[0]; //Layer 0 es la input
 
-	uint64_t ts = cu_get_time_usec();
+	//uint64_t ts = cu_get_time_usec();
 	err = cudaMemcpy(&(il->outputs[1]), v->vals, v->size * sizeof(double), cudaMemcpyHostToDevice);
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
 		return -1;
 	}
-	printf("%s:: time to copy %llu\n", __func__, cu_get_time_usec() - ts);
+	//printf("%s:: time to copy %llu\n", __func__, cu_get_time_usec() - ts);
 
 	//printInput<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(c->input, c->n_inputs);
 
