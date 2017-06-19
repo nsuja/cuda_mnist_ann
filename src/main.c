@@ -64,19 +64,20 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 	ts1 = ts2 = ts3 = ts4 = ts5 = ts6 = 0;
 
 	//Para separar de la inicializacion
+	sleep(1);
 
 	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
-		//fprintf(stdout, "==== IMAGEN NUMERO %d\n", img_count);
+		fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
 
 		ts = get_time_usec();
-		feedInputFixed(nn, &input_data_u8[img_count * (784+1)], 784);
+		feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
 		ts1 += get_time_usec() - ts;
-		printf("ts1:: %llu feed_input\n", get_time_usec() - ts);
+		//printf("ts1:: %llu feed_input\n", get_time_usec() - ts);
 
 		ts = get_time_usec();
 		cuda_feed_input_from_super_input(cu_nn, img_count);
 		ts2 += get_time_usec() - ts;
-		printf("ts2:: %llu cuda_feed_input\n", get_time_usec() - ts);
+		//printf("ts2:: %llu cuda_feed_input\n", get_time_usec() - ts);
 
 		ts = get_time_usec();
 		feedForwardNetwork(nn);
@@ -107,11 +108,15 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		cu_predictedNum = cuda_get_network_classification(cu_nn);
 		if(cu_predictedNum != input_labels[img_count]) cu_errCount++;
 
+		//if(classification != cu_predictedNum) {
+		//	printf("ES DISTINTO %d %d", classification, cu_predictedNum);
+		//	exit(0);
+		//}
+
 		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
 		//printf("\n      Prediction: %d   Actual: %d ",classification, pkt->label);
 		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
 		//getchar();
-
 
 		displayTrainingProgress(img_count, errCount, 3,5);
 		displayTrainingProgress(img_count, cu_errCount, 13,5);
@@ -167,7 +172,6 @@ void testNetwork(Network *nn){
 
 		// Display progress during testing
 		displayTestingProgress(imgCount, errCount, 5,5);
-		//        displayImage(&img, lbl, classification, 7,6);
 
 	}
 
@@ -189,10 +193,10 @@ void *read_data(void)
 		MNIST_Image img = getImage(imageFile);
 		MNIST_Label lbl = getLabel(labelFile);
 
-		input_data[img_count] = 1; //BIAS
-		input_data_u8[img_count] = 1; //BIAS
-		loadInputData(&img, &input_data[img_count * (28 * 28 + 1)]);
-		loadInputDataU8(&img, &input_data_u8[img_count * (28 * 28 + 1)]);
+		input_data[img_count * (28 * 28 + 1)] = 1; //BIAS
+		input_data_u8[img_count * (28 * 28 + 1)] = 1; //BIAS
+		loadInputData(&img, &input_data[img_count * (28 * 28 + 1) + 1]);
+		loadInputDataU8(&img, &input_data_u8[img_count * (28 * 28 + 1) + 1]);
 		input_labels[img_count] = (uint8_t)lbl;
 
 		img_count ++;
@@ -269,11 +273,9 @@ int main(int argc, const char * argv[])
 	Network *nn = createNetwork(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 	Cuda_Network *cu_nn = cuda_create_network(MNIST_IMG_HEIGHT * MNIST_IMG_WIDTH, 20, 10);
 
-	sleep(1);
 	uint64_t ts1 = get_time_usec();
 	cuda_copy_to_super_input(cu_nn, input_data);
 	printf("COPIA A SUPER INPUT:: %llu\n", get_time_usec() - ts1);
-	exit(0);
 
 	trainNetwork(nn, cu_nn);
 

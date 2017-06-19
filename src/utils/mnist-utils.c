@@ -196,6 +196,7 @@ int loadInputData(MNIST_Image *img, double *inp)
 	size = MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT;
 	for (int i=0; i < size; i++) {
 		inp[i] = img->pixel[i] ? 1 : 0;
+		//printf("pix %d .... inp %f\n", img->pixel[i], inp[i]);
 	}
 
 	return 0;

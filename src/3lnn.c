@@ -67,7 +67,8 @@ void printLayerStatus(Network *nn, LayerType ltype)
 {
 	int nodeSize = 0;
 	if (ltype==HIDDEN) nodeSize=nn->hidNodeSize;
-	else nodeSize=nn->outNodeSize;
+	else if( ltype==OUTPUT) nodeSize=nn->outNodeSize;
+	else nodeSize=nn->inpNodeSize;
 	Layer *l = getLayer(nn, ltype);
 
 	uint8_t *sbptr = (uint8_t*) l->nodes;
@@ -77,10 +78,12 @@ void printLayerStatus(Network *nn, LayerType ltype)
 		Node *n = (Node *)sbptr;
 
 		fprintf(stderr, "Node %d: Bias %lf Output %lf Weights: \n", o, n->bias, n->output);
-		for (int i=0; i<n->wcount; i++){
-			fprintf(stderr, "%01.06lf ", n->weights[i]);
+		if(ltype != INPUT) {
+			for (int i=0; i<n->wcount; i++){
+				fprintf(stderr, "%01.06lf ", n->weights[i]);
+			}
+			fprintf(stderr, "\n");
 		}
-		fprintf(stderr, "\n");
 
 		sbptr += nodeSize;
 	}
@@ -333,20 +336,16 @@ void calcLayer(Network *nn, LayerType ltype){
 	Layer *l;
 	l = getLayer(nn, ltype);
 
+	//fprintf(stderr, "PRE Calculando... %d: inp!\n", ltype);
+	//printLayerStatus(nn,INPUT);
+	//fprintf(stderr, "PRE Calculando... %d: hid!\n", ltype);
+	//printLayerStatus(nn,ltype);
 	for (int i=0;i<l->ncount;i++){
 		calcNodeOutput(nn, ltype, i);
 	}
-//	if(ltype == OUTPUT) {
-		//fprintf(stderr, "Calculando... %d: OUTPUT!\n", ltype);
-		//printLayerStatus(nn,ltype);
-//	}
 	for (int i=0;i<l->ncount;i++){
 		activateNode(nn,ltype,i);
 	}
-//	if(ltype == OUTPUT) {
-		//fprintf(stderr, "Calculando... %d: ACTIVATED!\n", ltype);
-		//printLayerStatus(nn,ltype);
-//	}
 }
 
 
@@ -358,7 +357,9 @@ void calcLayer(Network *nn, LayerType ltype){
  */
 
 void feedForwardNetwork(Network *nn){
+	//fprintf(stderr, "%s:: HIDDEN\n", __func__);
 	calcLayer(nn, HIDDEN);
+	//fprintf(stderr, "%s:: OUTPUT\n", __func__);
 	calcLayer(nn, OUTPUT);
 }
 

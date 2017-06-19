@@ -93,6 +93,9 @@ struct Cuda_Node {
  */
 struct Cuda_Layer {
 	int n_output;
+	double *targets[10];
+	double *err_signal;
+	double *err_sum;
 	double *outputs;
 	Cuda_Node *nodes;
 };
@@ -168,7 +171,7 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	while ( tid < size ) {
 		temp += V1[tid] * V2[tid] ;
 		if(log)
-			printf("(%d, %d, %d) tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, tid, V1[tid], V2[tid], temp);
+			printf("(%d, %d, %d) weights %p dst %p tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, V2, V3, tid, V1[tid], V2[tid], temp);
 		tid += stride;
 	}
 
@@ -198,7 +201,6 @@ __global__ void vectorGetErrorSum(const double *err_signal, const double *weight
 	//Guarda la suma de cada thread
 	__shared__ double cache[THREAD_PER_BLOCK] ;
 	double temp = 0;
-	double out[THREAD_PER_BLOCK] = {0};
 	unsigned int tid = blockDim.x * blockIdx.x + threadIdx.x ;
 	int stride = gridDim.x * blockDim.x;
 
@@ -259,8 +261,10 @@ __global__ void naiveGetMax(const double *vec, const int size, double *val, int 
 			}
 		}
 		__syncthreads();
-		*val = max;
-		*ind = pos-1;
+		if(val)
+			*val = max;
+		if(ind)
+			*ind = pos-1;
 	}
 }
 
@@ -327,7 +331,7 @@ void cuda_print_vector(FILE * fp, char *name, double *vec, int n)
 	cudaMemcpy(aux, vec, sizeof(double)*n, cudaMemcpyDeviceToHost);
 	fprintf(fp, "%s:\n", name);
 	for(int i = 0; i < n; i++) {
-		fprintf(fp, "%1.06f ", aux[i]);
+		fprintf(fp, "%1.06f ", i, aux[i]);
 	}
 	fprintf(fp, "\n");
 	free(aux);
@@ -351,10 +355,14 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype, int print_weigh
 
 	fprintf(stderr, "CUDA_Layer %d: \n", ltype);
 	for (int o=0; o<l->n_output - 1 ;o++){
-		double *aux_weights = (double*)calloc(1, sizeof(double) * l->nodes[o].wcount);
-		cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
+		double *aux_weights = NULL;
+		if(l->nodes) {
+			aux_weights = (double*)calloc(1, sizeof(double) * l->nodes[o].wcount);
+			cudaMemcpy(aux_weights, l->nodes[o].weights, sizeof(double) * l->nodes[o].wcount, cudaMemcpyDeviceToHost);
+			fprintf(stderr, "CUDA_Node %d: Bias %lf Output %lf(%p) Weights(%p): \n", o, aux_weights[0], aux_outputs[o+1], &l->outputs[o], l->nodes[o].weights);
+		} else
+			fprintf(stderr, "CUDA_Node %d: Output %lf Weights: \n", o, aux_outputs[o+1]);
 
-		fprintf(stderr, "CUDA_Node %d: Bias %lf Output %lf Weights: \n", o, aux_weights[0], aux_outputs[o+1]);
 		if(print_weights) {
 			for (int i=1; i<l->nodes->wcount; i++){
 				fprintf(stderr, "%01.06lf ", aux_weights[i]);
@@ -412,6 +420,18 @@ Cuda_Layer *cuda_create_layer(int node_count, int weight_count)
 
 	layer->n_output = node_count + 1;
 	err = cudaMalloc((void **)&layer->outputs, sizeof(double) * (node_count + 1));
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
+		return NULL;
+	}
+
+	err = cudaMalloc((void **)&layer->err_signal, sizeof(double) * (node_count + 1));
+	if (err != cudaSuccess) {
+		fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
+		return NULL;
+	}
+
+	err = cudaMalloc((void **)&layer->err_sum, sizeof(double) * (node_count + 1));
 	if (err != cudaSuccess) {
 		fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
 		return NULL;
@@ -491,27 +511,65 @@ Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	return l;
 }
 
+int cuda_layer_init_targets(Cuda_Network *nn, Cuda_Layer_Type ltype)
+{
+	cudaError_t err = cudaSuccess;
+	Cuda_Layer *l = cuda_get_layer(nn, ltype);
+	double *aux;
+	int i;
+
+	for(i = 0; i < 10; i++) {
+		aux = (double*)calloc(1, 11 * sizeof(double));
+		if(!aux) {
+			fprintf(stderr, "Fallo malloc errno %d %s\n", errno, strerror(errno));
+			return -1;
+		}
+
+		aux[0] = 1.0;
+		aux[i+1] = 1.0;
+
+		err = cudaMalloc((void **)&l->targets[i], sizeof(double) * 11);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "Failed to allocate input vec (error code %s)!\n", cudaGetErrorString(err));
+			return -1;
+		}
+
+		// Copio Vector de salida
+		err = cudaMemcpy(l->targets[i], aux, sizeof(double) * 11, cudaMemcpyHostToDevice);
+		if (err != cudaSuccess) {
+			fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
+			free(aux);
+			return -1;
+		}
+		free(aux);
+	}
+
+	return 0;
+}
+
+
+
 int cuda_layer_init_outputs(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	cudaError_t err = cudaSuccess;
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 	double *aux;
 
-	//aux = (double*)calloc(1, l->n_output * sizeof(double));
-	//if(!aux) {
-	//	fprintf(stderr, "Fallo malloc errno %d %s\n", errno, strerror(errno));
-	//	return -1;
-	//}
-	//aux[0] = 1.0;
+	aux = (double*)calloc(1, l->n_output * sizeof(double));
+	if(!aux) {
+		fprintf(stderr, "Fallo malloc errno %d %s\n", errno, strerror(errno));
+		return -1;
+	}
+	aux[0] = 1.0;
 
-	//// Copio Vector de salida
-	//err = cudaMemcpy(l->outputs, aux, sizeof(double) * l->n_output, cudaMemcpyHostToDevice);
-	//if (err != cudaSuccess) {
-	//	fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
-	//	free(aux);
-	//	return -1;
-	//}
-	//free(aux);
+	// Copio Vector de salida
+	err = cudaMemcpy(l->outputs, aux, sizeof(double) * l->n_output, cudaMemcpyHostToDevice);
+	if (err != cudaSuccess) {
+		fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
+		free(aux);
+		return -1;
+	}
+	free(aux);
 
 	return 0;
 }
@@ -615,6 +673,9 @@ Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
 
 	cuda_init_super_input(nn);
 
+	cuda_layer_init_targets(nn, CUDA_LAYER_HIDDEN);
+	cuda_layer_init_targets(nn, CUDA_LAYER_OUTPUT);
+
 	// Init connection bias with random values
 	ret = cuda_layer_init_bias(nn, CUDA_LAYER_HIDDEN);
 	if(ret) goto _create_network_exit_error;
@@ -649,8 +710,7 @@ _create_network_exit_error:
  */
 int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 {
-	double *dev_buf = NULL, *err_signal = NULL, *super_weight_vector = NULL, *hid_err_signal = NULL;
-	double *host_buf = NULL;
+	static double *super_weight_vector = NULL;
 	cudaError_t err = cudaSuccess;
 	int n;
 	int blocks_per_grid;
@@ -660,92 +720,45 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	hl = cuda_get_layer(nn, CUDA_LAYER_HIDDEN);
 	ol = cuda_get_layer(nn, CUDA_LAYER_OUTPUT);
 
-	err = cudaMalloc((void **)&super_weight_vector, sizeof(double) * (ol->n_output - 1) * ol->nodes[0].wcount);
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector super weight (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
+	if(!super_weight_vector) {
+		err = cudaMalloc((void **)&super_weight_vector, sizeof(double) * (ol->n_output - 1) * ol->nodes[0].wcount);
+		if(err != cudaSuccess) {
+			fprintf(stderr, "Failed to allocate device vector super weight (error code %s)!\n", cudaGetErrorString(err));
+			return -1;
+		}
 	}
 	for(int i = 1; i < ol->n_output; i++) {
 		err = cudaMemcpy(super_weight_vector + ((i-1)*ol->nodes[0].wcount), ol->nodes[i-1].weights, sizeof(double) * ol->nodes[i-1].wcount, cudaMemcpyDeviceToDevice);
 	}
 	cuda_print_vector(stderr, "SUPER WEIGHT VECTOR", super_weight_vector, (ol->n_output - 1) * ol->nodes[0].wcount);
 
-	err = cudaMalloc((void **)&err_signal, sizeof(double) * (ol->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector error signal (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-
-	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (ol->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-	host_buf = (double *)calloc(1, sizeof(double) * (ol->n_output));
-
-	//Armo el vector
-	host_buf[0] = 0;
-	for(int i = 1; i < ol->n_output; i++)
-		host_buf[i] = (i == target_class+1) ? 1:0;
-
-	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
-		//XXX Liberar
-		return -1;
-	}
-
 	//Llamar a kernel para obtener signal de error y update de weights
 	//Internamente saltea el primer elemento
 	n = ol->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 0, 0);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->targets[target_class], ol->outputs, ol->err_signal, n, 0, 0);
 	//cuda_print_vector(stderr, "ERR SIGg", err_signal, n);
 	//Ya arme la err_signal
 
-
-	free(host_buf);
-	host_buf = (double *)calloc(1, sizeof(double) * (hl->n_output));
-	for(int i = 0; i < hl->n_output; i++)
-		host_buf[i] = 0;
-
-	cuda_free(dev_buf, -1);
-	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (hl->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (hl->n_output), cudaMemcpyHostToDevice);
-
 	n = (ol->n_output - 1) * ol->nodes[0].wcount;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-	vectorGetErrorSum<<<blocks_per_grid, THREAD_PER_BLOCK>>>(err_signal, super_weight_vector, dev_buf, n, hl->n_output, ol->n_output, 0);
+	vectorGetErrorSum<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->err_signal, super_weight_vector, hl->err_sum, n, hl->n_output, ol->n_output, 0);
 	//cuda_print_vector(stderr, "SUM ERROR", dev_buf, hl->n_output);
 
-	err = cudaMalloc((void **)&hid_err_signal, sizeof(double) * (hl->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector error signal (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
 	n = hl->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, hl->outputs, hid_err_signal, n, 1, 0);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->err_sum, hl->outputs, hl->err_signal, n, 1, 0);
 	//cuda_print_vector(stderr, "HID ERR SIGNAL", hid_err_signal, hl->n_output);
 	//Update de weights con hid_err_signal
 	//fprintf(stderr, "++++ AFTER ERRSIGNAL\n");
 	n = il->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 	for(int i = 1; i < hl->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->nodes[i-1].weights, il->outputs, &hid_err_signal[i], n, 0);
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->nodes[i-1].weights, il->outputs, &hl->err_signal[i], n, 0);
 		//print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 	}
 
-	cuda_free(super_weight_vector, -1);
-	cuda_free(err_signal, -1);
-	cuda_free(dev_buf, -1);
-	cuda_free(hid_err_signal, -1);
-
-	free(host_buf);
+	//cuda_free(super_weight_vector, -1);
 
 	return 0;
 }
@@ -757,9 +770,6 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
  */
 int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 {
-	double *dev_buf = NULL, *err_signal = NULL;
-	double *host_buf = NULL;
-	cudaError_t err = cudaSuccess;
 	int n;
 	int blocks_per_grid;
 	Cuda_Layer *ol, *hl;
@@ -770,47 +780,18 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 	n = ol->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 
-	err = cudaMalloc((void **)&err_signal, sizeof(double) * (ol->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector error signal (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-
-	err = cudaMalloc((void **)&dev_buf, sizeof(double) * (ol->n_output));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector auxiliar (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-	host_buf = (double *)calloc(1, sizeof(double) * (ol->n_output));
-
-	//Armo el vector
-	host_buf[0] = 0;
-	for(int i = 1; i < ol->n_output; i++)
-		host_buf[i] = (i == target_class+1) ? 1:0;
-
-	err = cudaMemcpy(dev_buf, host_buf, sizeof(double) * (ol->n_output), cudaMemcpyHostToDevice);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "%s:: Failed to copy input from host to device cell (error code %s)!\n", __func__, cudaGetErrorString(err));
-		//XXX Liberar
-		return -1;
-	}
-
 	//Llamar a kernel para obtener signal de error y update de weights
 	//Internamente saltea el primer elemento
-	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(dev_buf, ol->outputs, err_signal, n, 0, 0);
-	cuda_print_vector(stderr, "ERROR VECTOR", err_signal, n);
+	vectorGetErrSignal<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->targets[target_class], ol->outputs, hl->err_signal, n, 0, 0);
+	cuda_print_vector(stderr, "ERROR VECTOR", hl->err_signal, n);
 
 	n = hl->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 
 	//TODO Ver de actualizar todo.. vectorizar
 	for(int i = 1; i < ol->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &err_signal[i], n, 0);
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &hl->err_signal[i], n, 0);
 	}
-
-	cuda_free(err_signal, -1);
-	cuda_free(dev_buf, -1);
-	free(host_buf);
 
 	return 0;
 }
@@ -873,7 +854,6 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	int n;
 	int blocks_per_grid;
-	double *V3_D, *V3_H;
 	Cuda_Layer *prev_l, *cur_l;
 	//cudaError_t err = cudaSuccess;
 
@@ -901,26 +881,25 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		return -1;
 	}
 
-	//printf("bpg %d tpb %d\n", blocks_per_grid, THREAD_PER_BLOCK);
-	V3_H = (double *)calloc(1, sizeof(double) * blocks_per_grid);
-	cudaMalloc((void **)&V3_D, blocks_per_grid * sizeof(double));
+//	fprintf(stderr, "A calcular output type %d:\n", ltype);
+//	if(ltype == CUDA_LAYER_HIDDEN)
+//		cuda_print_vector(stdout, "IL OUTPUTS", prev_l->outputs, 785);
+//	print_layer_status(nn,ltype, 1);
 
-	//fprintf(stderr, "A calcular output type %d\n", ltype);
-
-	cudaDeviceSynchronize();
 	for (int i = 0; i < cur_l->n_output - 1; i++){
-		//fprintf(stderr, "output %d wcount %d prev_l cant %d BLOCK %d\n", i, cur_l->nodes[i].wcount, prev_l->n_output, blocks_per_grid);
 		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0);
-		cudaDeviceSynchronize();
-		//fprintf(stderr, "Output: ");
-		cuda_print_double(stderr, &(cur_l->outputs[i+1]));
-		//fprintf(stderr, "\n");
-		//print_layer_status(nn,ltype);
 
-		//c->output = sum / c->n_inputs; // normalize output (0-1)
-		//fprintf(stderr, "%s:: output %f %f\n", __func__, sum, cur_l->outputs[i]);
+		//cudaDeviceSynchronize();
+
+		//fprintf(stderr, "Listo: outputs %p: ", prev_l->outputs, cur_l->nodes[i].weights);
+		//cuda_print_double(stderr, &(prev_l->outputs[0]));
+		//fprintf(stderr, ".. weights %p: ", prev_l->outputs, cur_l->nodes[i].weights);
+		//cuda_print_double(stderr, &(cur_l->nodes[i].weights[0]));
+		//fprintf(stderr, ".. Output: ", prev_l->outputs, cur_l->nodes[i].weights);
+		//cuda_print_double(stderr, &(cur_l->outputs[i+1]));
+		//fprintf(stderr, "\n");
 	}
-	free(V3_H);
+	//fprintf(stdout, "Listo_outputs\n");
 
 	return 0;
 }
@@ -934,16 +913,20 @@ void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
 
+//	fprintf(stderr, "Cuda PRE Calculando... %d: inp!\n", ltype);
+//	print_layer_status(nn,CUDA_LAYER_INPUT, 0);
+//	fprintf(stderr, "Cuda PRE Calculando... %d: hid!\n", ltype);
+//	print_layer_status(nn,ltype, 1);
 	cuda_calc_node_output(nn, ltype);
-//	if(ltype == CUDA_LAYER_OUTPUT) {
-		//fprintf(stderr, "Cuda_Calculando... %d: OUTPUT!\n", ltype);
-		//print_layer_status(nn,ltype, 0);
-//	}
+
+	//fprintf(stderr, "Cuda_Calculando... %d: OUTPUT!\n", ltype);
+	//print_layer_status(nn,ltype, 1);
+
+	cudaDeviceSynchronize(); //Sincronizo para tener el output bien
+
 	cuda_activate_node(nn, ltype);
-//	if(ltype == CUDA_LAYER_OUTPUT) {
-		//fprintf(stderr, "Cuda_Calculando... %d: ACTIVATED!\n", ltype);
-//		print_layer_status(nn,ltype, 0);
-//	}
+	//fprintf(stderr, "Cuda_Calculando... %d: ACTIVATED!\n", ltype);
+	//print_layer_status(nn,ltype, 1);
 }
 
 /**
@@ -954,7 +937,7 @@ void cuda_feed_forward_network(Cuda_Network *nn)
 {
 	//fprintf(stderr, "A calcular layer HIDDEN %d\n", CUDA_LAYER_HIDDEN);
 	cuda_calc_layer(nn, CUDA_LAYER_HIDDEN);
-	//print_layer_status(nn, CUDA_LAYER_HIDDEN, 0);
+	//print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 
 	//fprintf(stderr, "A calcular layer OUTPUT %d\n", CUDA_LAYER_OUTPUT);
 	cuda_calc_layer(nn, CUDA_LAYER_OUTPUT);
@@ -994,15 +977,15 @@ int cuda_get_network_classification(Cuda_Network *nn)
 {
 	cudaError_t err = cudaSuccess;
 	int n, blocks_per_grid;
-	double *dev_max = 0, host_max;
+	//double *dev_max = 0, host_max;
 	int *dev_ind = 0, host_ind;
 	Cuda_Layer *ol = cuda_get_layer(nn, CUDA_LAYER_OUTPUT);
 
-	err = cudaMalloc((void **)&dev_max, sizeof(double));
-	if(err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector dev_max (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
+	//err = cudaMalloc((void **)&dev_max, sizeof(double));
+	//if(err != cudaSuccess) {
+	//	fprintf(stderr, "Failed to allocate device vector dev_max (error code %s)!\n", cudaGetErrorString(err));
+	//	return -1;
+	//}
 
 	cudaMalloc((void **)&dev_ind, sizeof(int));
 	if(err != cudaSuccess) {
@@ -1012,16 +995,16 @@ int cuda_get_network_classification(Cuda_Network *nn)
 
 	n = ol->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
-	naiveGetMax<<<blocks_per_grid, n>>>(ol->outputs, ol->n_output, dev_max, dev_ind, 0);
-	cudaDeviceSynchronize();
+	naiveGetMax<<<blocks_per_grid, n>>>(ol->outputs, ol->n_output, NULL, dev_ind, 0);
+	//cudaDeviceSynchronize();
 	//cuda_print_vector(stderr, "OUTPUT", ol->outputs, (ol->n_output));
 
-	cudaMemcpy(&host_max, dev_max, sizeof(double), cudaMemcpyDeviceToHost);
+	//cudaMemcpy(&host_max, dev_max, sizeof(double), cudaMemcpyDeviceToHost);
 	cudaMemcpy(&host_ind, dev_ind, sizeof(int), cudaMemcpyDeviceToHost);
 
 	//fprintf(stderr, "ASDASDDSASADASDASDSADDSA %f %d\n", host_max, host_ind);
 
-	cuda_free(dev_max, -1);
+	//cuda_free(dev_max, -1);
 	cuda_free(dev_ind, -1);
 
 	return host_ind;
@@ -1030,7 +1013,6 @@ int cuda_get_network_classification(Cuda_Network *nn)
 int cuda_init_super_input(Cuda_Network *nn)
 {
 	cudaError_t err = cudaSuccess;
-	double *dev_max;
 	err = cudaMalloc((void **)&nn->super_input, sizeof(double) * (784+1) * 60000);
 	if(err != cudaSuccess) {
 		fprintf(stderr, "Failed to allocate device vector dev_max (error code %s)!\n", cudaGetErrorString(err));
@@ -1049,6 +1031,7 @@ int cuda_copy_to_super_input(Cuda_Network *nn, double *input_data)
 		fprintf(stderr, "Failed to copy input from host to device cell (error code %s)!\n", cudaGetErrorString(err));
 		return -1;
 	}
+	//cuda_print_vector(stdout, "SUPER INP", nn->super_input, 3);
 
 	return 0;
 }
@@ -1060,13 +1043,12 @@ int cuda_copy_to_super_input(Cuda_Network *nn, double *input_data)
  */
 int cuda_feed_input_from_super_input(Cuda_Network *nn, int i)
 {
-	cudaError_t err = cudaSuccess;
 	Cuda_Layer *il = cuda_get_layer(nn, CUDA_LAYER_INPUT);
 
 	//XXX Leak del primer output!!
 	il->outputs = nn->super_input + (i * (784+1));
 
-	//printInput<<<BLOCK_PER_GRID, THREAD_PER_BLOCK>>>(c->input, c->n_inputs);
+	//cuda_print_vector(stdout, "SUPER INP", nn->super_input + (i * (784+1)), 785);
 
 	return 0;
 }

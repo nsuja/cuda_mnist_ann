@@ -238,8 +238,8 @@ valgrind: $(BIN_PATH)/$(OUTPUT) $(DEBUG_PATH)
 	valgrind --leak-check=full --leak-resolution=high  --log-file=$(DEBUG_PATH)/valgrind.log $(BIN_PATH)/$(OUTPUT)
 
 run_debug: $(BIN_PATH)/$(OUTPUT) $(DEBUG_PATH)
-	$(BIN_PATH)/$(OUTPUT) 2>$(DEBUG_PATH)/stderr.log
-#$(BIN_PATH)/$(OUTPUT) 1>$(DEBUG_PATH)/stdout.log 2>$(DEBUG_PATH)/stderr.log
+#$(BIN_PATH)/$(OUTPUT) 2>$(DEBUG_PATH)/stderr.log
+	$(BIN_PATH)/$(OUTPUT) 1>$(DEBUG_PATH)/stdout.log 2>$(DEBUG_PATH)/stderr.log
 
 $(BIN_PATH)/$(OUTPUT): $(BIN_PATH) $(OBJECTS) $(CUDA_OBJECTS)
 	$(CC) -o "$@" $(OBJECTS) $(CUDA_OBJECTS) $(LDFLAGS) 
