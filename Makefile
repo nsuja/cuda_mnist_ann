@@ -248,7 +248,7 @@ $(OBJECTS): %.o : %.c
 	$(CC) $(CFLAGS) -o "$@" -c "$<"
 
 $(CUDA_OBJECTS): %.o : %.cu
-	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) -o $@ -c $<
+	$(EXEC) $(NVCC) $(INCLUDES) $(ALL_CCFLAGS) $(GENCODE_FLAGS) --default-stream per-thread -o $@ -c $<
 
 $(DEBUG_PATH):
 	$(MKDIR) $(DEBUG_PATH)

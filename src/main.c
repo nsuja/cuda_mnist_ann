@@ -60,18 +60,15 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 	int cu_errCount = 0;
 	uint64_t ts;
 
-	uint64_t ts1, ts2, ts3, ts4, ts5, ts6;
-	ts1 = ts2 = ts3 = ts4 = ts5 = ts6 = 0;
-
-	//Para separar de la inicializacion
-	sleep(1);
+	uint64_t ts1, ts2, ts3, ts4, ts5, ts6, ts7;
+	ts1 = ts2 = ts3 = ts4 = ts5 = ts6 = ts7 = 0;
 
 	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
 		//fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
 
-		ts = get_time_usec();
-		feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
-		ts1 += get_time_usec() - ts;
+//		ts = get_time_usec();
+//		feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
+//		ts1 += get_time_usec() - ts;
 		//printf("ts1:: %llu feed_input\n", get_time_usec() - ts);
 
 		ts = get_time_usec();
@@ -79,9 +76,9 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		ts2 += get_time_usec() - ts;
 		//printf("ts2:: %llu cuda_feed_input\n", get_time_usec() - ts);
 
-		ts = get_time_usec();
-		feedForwardNetwork(nn);
-		ts3 += get_time_usec() - ts;
+//		ts = get_time_usec();
+//		feedForwardNetwork(nn);
+//		ts3 += get_time_usec() - ts;
 		//printf("ts3:: %llu feed_forward\n", get_time_usec() - ts);
 
 		ts = get_time_usec();
@@ -89,9 +86,9 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		ts4 += get_time_usec() - ts;
 		//printf("ts4:: %llu cuda_feed_forward\n", get_time_usec() - ts);
 
-		ts = get_time_usec();
-		backPropagateNetwork(nn, input_labels[img_count]);
-		ts5 += get_time_usec() - ts;
+//		ts = get_time_usec();
+//		backPropagateNetwork(nn, input_labels[img_count]);
+//		ts5 += get_time_usec() - ts;
 		//printf("ts5:: %llu backpropagation\n", get_time_usec() - ts);
 
 		ts = get_time_usec();
@@ -101,16 +98,19 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 
 		//displayImage(pkt->img, 6,6);
 
-		int classification = getNetworkClassification(nn);
-		if (classification != input_labels[img_count]) errCount++;
+//		int classification = getNetworkClassification(nn);
+//		if (classification != input_labels[img_count]) errCount++;
 
+		ts = get_time_usec();
 		int cu_predictedNum;
 		cu_predictedNum = cuda_get_network_classification(cu_nn);
 		if(cu_predictedNum != input_labels[img_count]) cu_errCount++;
+		ts7 += get_time_usec() - ts;
+		//printf("ts7:: %llu cuda backpropagation\n", get_time_usec() - ts);
+
 
 		//if(classification != cu_predictedNum) {
 		//	printf("ES DISTINTO %d %d", classification, cu_predictedNum);
-		//	exit(0);
 		//}
 
 		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
@@ -118,8 +118,11 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
 		//getchar();
 
-		displayTrainingProgress(img_count, errCount, 3,5);
-		displayTrainingProgress(img_count, cu_errCount, 13,5);
+		//displayTrainingProgress(img_count, errCount, 3,5);
+		displayTrainingProgress(img_count, cu_errCount, 3,5);
+
+//		if(img_count == 1000)
+//			exit(0);
 
 		img_count ++;
 	}
@@ -130,6 +133,7 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 	printf("ts4:: %lf %llu %d\n", (double)ts4/(double)img_count, ts4, img_count);
 	printf("ts5:: %lf %llu %d\n", (double)ts5/(double)img_count, ts5, img_count);
 	printf("ts6:: %lf %llu %d\n", (double)ts6/(double)img_count, ts6, img_count);
+	printf("ts7:: %lf %llu %d\n", (double)ts7/(double)img_count, ts7, img_count);
 }
 
 /**
@@ -162,24 +166,24 @@ void testNetwork(Network *nn, Cuda_Network *cu_nn)
 
 		// Convert the MNIST image to a standardized vector format and feed into the network
 		Vector *inpVector = getVectorFromImage(&img);
-		feedInput(nn, inpVector);
+		//feedInput(nn, inpVector);
 		cuda_feed_input(cu_nn, inpVector);
 
 		// Feed forward all layers (from input to hidden to output) calculating all nodes' output
-		feedForwardNetwork(nn);
+		//feedForwardNetwork(nn);
 		cuda_feed_forward_network(cu_nn);
 
 		// Classify image by choosing output cell with highest output
-		int classification = getNetworkClassification(nn);
-		if (classification!=lbl) errCount++;
+		//int classification = getNetworkClassification(nn);
+		//if (classification!=lbl) errCount++;
 
 		int cu_predictedNum;
 		cu_predictedNum = cuda_get_network_classification(cu_nn);
 		if(cu_predictedNum != lbl) cu_errCount++;
 
 		// Display progress during testing
-		displayTestingProgress(imgCount, errCount, 5,5);
-		displayTestingProgress(imgCount, cu_errCount, 15,5);
+		//displayTestingProgress(imgCount, errCount, 5,5);
+		displayTestingProgress(imgCount, cu_errCount, 5,5);
 
 	}
 

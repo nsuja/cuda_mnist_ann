@@ -40,6 +40,7 @@
 #define CUDA_LAYER_CANT (3)
 
 #define CUDA_LEARNING_RATE_SIGMOID (0.2) //91.5%
+__constant__ double _cuda_learning_rate;
 
 #define NO_DEBUG_ALL (1)
 
@@ -109,6 +110,7 @@ struct Cuda_Network{
 	Cuda_Act_Func_Type out_layer_act_type;
 	double *super_input;
 	Cuda_Layer **layers;
+	cudaStream_t *streams;
 };
 
 
@@ -128,6 +130,80 @@ uint64_t cu_get_time_usec()
  * Computes the vector addition of A and B into C. The 3 vectors have the same
  * number of elements numElements.
  */
+template <unsigned int block_size>
+__global__ void cu_dot(double * a_d, double * b_d, double * block_results_d,
+		size_t size) {
+	extern __shared__ int cache[];
+
+	unsigned int tid = threadIdx.x;
+	int idx = threadIdx.x + blockIdx.x * blockDim.x;
+	cache[tid] = 0;
+
+	if(idx < size) {
+		cache[tid] = a_d[idx] * b_d[idx];
+	}
+
+	__syncthreads();
+	if(block_size >= 512) {
+		if(tid < 256) {
+			cache[tid] += cache[tid + 256];
+		}
+		__syncthreads();
+	}
+
+	if(block_size >= 256) {
+		if(tid < 128) {
+			cache[tid] += cache[tid + 128];
+		}
+		__syncthreads();
+	}
+
+	if(block_size >= 128) {
+		if(tid < 64) {
+			cache[tid] += cache[tid + 64];
+		}
+		__syncthreads();
+	}
+
+	if(tid < 32) {
+		if(block_size >= 64) {
+			cache[tid] += cache[tid + 32];
+		}
+		__syncthreads();
+
+		if(block_size >= 32) {
+			cache[tid] += cache[tid + 16];
+		}
+		__syncthreads();
+
+		if(block_size >= 16) {
+			cache[tid] += cache[tid + 8];
+		}
+		__syncthreads();
+
+		if(block_size >= 8) {
+			cache[tid] += cache[tid + 4];
+		}
+		__syncthreads();
+
+		if(block_size >= 4) {
+			cache[tid] += cache[tid + 2];
+		}
+		__syncthreads();
+
+		if(block_size >= 2) {
+			cache[tid] += cache[tid + 1];
+		}
+	}
+
+	__syncthreads();
+	if(tid == 0) {
+		block_results_d[blockIdx.x] = cache[0];
+	}
+}
+
+
+
 	__global__ void
 vectorAdd(const float *A, const float *B, float *C, int numElements)
 {
@@ -170,8 +246,8 @@ __global__ void vectorDotProduct(const double *V1, const double *V2, double *V3,
 	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
 	while ( tid < size ) {
 		temp += V1[tid] * V2[tid] ;
-		if(log)
-			printf("(%d, %d, %d) weights %p dst %p tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, V2, V3, tid, V1[tid], V2[tid], temp);
+		//if(log)
+		//	printf("(%d, %d, %d) weights %p dst %p tid %d .. %f %f temp %f\n", blockDim.x, blockIdx.x, threadIdx.x, V2, V3, tid, V1[tid], V2[tid], temp);
 		tid += stride;
 	}
 
@@ -309,17 +385,22 @@ __global__ void vectorUpdateWeights(double *weights, double *prev_outputs, doubl
 	int stride = gridDim.x * blockDim.x;
 
 	//printf("Hola desde kernel blockdim %d blockidx %d thidx %d\n", blockDim.x, blockIdx.x, threadIdx.x);
-	//BIAS
-	if(tid == 0) {
-		weights[tid] = weights[tid] + ((double)CUDA_LEARNING_RATE_SIGMOID * (double)1.0 * (*err_signal));
-	} else {
-		//Pesos
-		for (int i = tid; i < weight_count; i += stride) { //+1 para no activar el output de BIAS
-			if(log)
-				printf("Kernel i %d tid %d, RATE %f prev %f err %f .. off %f ... weight %f\n", i, tid, CUDA_LEARNING_RATE_SIGMOID, prev_outputs[i], *err_signal, CUDA_LEARNING_RATE_SIGMOID * prev_outputs[i] * (*err_signal), weights[i]);
-			weights[i] += (CUDA_LEARNING_RATE_SIGMOID * prev_outputs[i] * (*err_signal));
-		}
-	}
+	for (int i = tid; i < weight_count; i += stride)
+		//weights[i] += (CUDA_LEARNING_RATE_SIGMOID * prev_outputs[i] * (*err_signal));
+		weights[i] += (_cuda_learning_rate * prev_outputs[i] * (*err_signal));
+
+//	//BIAS
+//	if(tid == 0) {
+//		weights[tid] = weights[tid] + (CUDA_LEARNING_RATE_SIGMOID * 1.0 * (*err_signal));
+//	} else {
+//		//Pesos
+//		for (int i = tid; i < weight_count; i += stride) { //+1 para no activar el output de BIAS
+//			//if(log)
+//			//	printf("Kernel i %d tid %d, RATE %f prev %f err %f .. off %f ... weight %f\n", i, tid, CUDA_LEARNING_RATE_SIGMOID, prev_outputs[i], *err_signal, CUDA_LEARNING_RATE_SIGMOID * prev_outputs[i] * (*err_signal), weights[i]);
+//			//weights[i] += (_cuda_learning_rate * prev_outputs[i] * (*err_signal));
+//			weights[i] += (CUDA_LEARNING_RATE_SIGMOID * prev_outputs[i] * (*err_signal));
+//		}
+//	}
 }
 
 void cuda_print_vector(FILE * fp, char *name, double *vec, int n)
@@ -468,6 +549,11 @@ int cuda_init_network(Cuda_Network *nn, int in_count, int hid_count, int out_cou
 	nn->layers[1] = cuda_create_layer(hid_count, in_count);
 	nn->layers[2] = cuda_create_layer(out_count, hid_count);
 
+	nn->streams = (cudaStream_t *)malloc(30 * sizeof(cudaStream_t));
+	for (int i = 0; i < 30; i++){
+		cudaStreamCreate(&nn->streams[i]);
+	}
+
 	return 0;
 }
 
@@ -483,6 +569,8 @@ void cuda_set_network_defaults(Cuda_Network *nn)
 	nn->out_layer_act_type = CUDA_ACT_SIGMOID;
 
 	nn->learning_rate = CUDA_LEARNING_RATE_SIGMOID;
+
+	cudaMemcpyToSymbol(_cuda_learning_rate, &nn->learning_rate, sizeof(double));
 }
 
 /**
@@ -590,6 +678,7 @@ int cuda_layer_init_bias(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	srand(time(NULL));
 	for(int o = 0; o < l->n_output; o++) {
 		aux[o] = rand()/(double)(RAND_MAX);
+		//aux[o] = 0.5;
 		if(o%2)
 			aux[o] = -aux[o];  // make half of the bias weights negative
 	}
@@ -633,6 +722,7 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 
 		for(int i = 0; i < n->wcount-1; i++){
 			aux[i] = 0.7*(rand()/(double)(RAND_MAX));
+			//aux[i] = 0.5;
 			if(i%2)
 				aux[i] = -aux[i];  // make half of the weights negative
 		}
@@ -754,7 +844,7 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	n = il->n_output;
 	blocks_per_grid = MIN(10, (n+THREAD_PER_BLOCK-1)/THREAD_PER_BLOCK);
 	for(int i = 1; i < hl->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(hl->nodes[i-1].weights, il->outputs, &hl->err_signal[i], n, 0);
+		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK, 0, nn->streams[i]>>>(hl->nodes[i-1].weights, il->outputs, &hl->err_signal[i], n, 0);
 		//print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 	}
 
@@ -790,7 +880,7 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 
 	//TODO Ver de actualizar todo.. vectorizar
 	for(int i = 1; i < ol->n_output; i++) {
-		vectorUpdateWeights<<<blocks_per_grid, THREAD_PER_BLOCK>>>(ol->nodes[i-1].weights, hl->outputs, &hl->err_signal[i], n, 0);
+		vectorUpdateWeights<<<1, 64, 0, nn->streams[i]>>>(ol->nodes[i-1].weights, hl->outputs, &hl->err_signal[i], n, 0);
 	}
 
 	return 0;
@@ -887,10 +977,14 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 //	print_layer_status(nn,ltype, 1);
 
 	for (int i = 0; i < cur_l->n_output - 1; i++){
-		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0);
+		//vectorDotProduct<<<10, 100>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0); //Dio mejores resultados
+		//vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0);
+		//vectorDotProduct<<<10, THREAD_PER_BLOCK/10, 0, nn->streams[i]>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0); //hay que sumar los outs.. 154, 214.. no vale la pena y no anda
+		vectorDotProduct<<<blocks_per_grid, THREAD_PER_BLOCK, 0, nn->streams[i]>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n, 0); //Funciona 156, 211
+
+		//cu_dot<THREAD_PER_BLOCK> <<<blocks_per_grid, THREAD_PER_BLOCK, THREAD_PER_BLOCK * sizeof(double)>>>(prev_l->outputs, cur_l->nodes[i].weights, &(cur_l->outputs[i+1]), n);
 
 		//cudaDeviceSynchronize();
-
 		//fprintf(stderr, "Listo: outputs %p: ", prev_l->outputs, cur_l->nodes[i].weights);
 		//cuda_print_double(stderr, &(prev_l->outputs[0]));
 		//fprintf(stderr, ".. weights %p: ", prev_l->outputs, cur_l->nodes[i].weights);
@@ -900,6 +994,7 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 		//fprintf(stderr, "\n");
 	}
 	//fprintf(stdout, "Listo_outputs\n");
+	//free(streams);
 
 	return 0;
 }

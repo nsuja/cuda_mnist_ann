@@ -179,8 +179,9 @@ Vector *getVectorFromImage(MNIST_Image *img)
 	Vector *v = (Vector*)malloc(sizeof(Vector) + (MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT * sizeof(double)));
 
 	v->size = MNIST_IMG_WIDTH*MNIST_IMG_HEIGHT;
-	for (int i=0;i<v->size;i++)
+	for (int i=0;i<v->size;i++) {
 		v->vals[i] = img->pixel[i] ? 1 : 0;
+	}
 
 	return v;
 }
