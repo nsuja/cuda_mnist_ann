@@ -336,10 +336,10 @@ void calcLayer(Network *nn, LayerType ltype){
 	Layer *l;
 	l = getLayer(nn, ltype);
 
-	fprintf(stderr, "PRE Calculando... %d: inp!\n", ltype);
-	printLayerStatus(nn,INPUT);
-	fprintf(stderr, "PRE Calculando... %d: hid!\n", ltype);
-	printLayerStatus(nn,ltype);
+	//fprintf(stderr, "PRE Calculando... %d: inp!\n", ltype);
+	//printLayerStatus(nn,INPUT);
+	//fprintf(stderr, "PRE Calculando... %d: hid!\n", ltype);
+	//printLayerStatus(nn,ltype);
 	for (int i=0;i<l->ncount;i++){
 		calcNodeOutput(nn, ltype, i);
 	}
@@ -357,10 +357,9 @@ void calcLayer(Network *nn, LayerType ltype){
  */
 
 void feedForwardNetwork(Network *nn){
-	fprintf(stderr, "%s:: HIDDEN\n", __func__);
+	//fprintf(stderr, "%s:: HIDDEN\n", __func__);
 	calcLayer(nn, HIDDEN);
-	getchar();
-	fprintf(stderr, "%s:: OUTPUT\n", __func__);
+	//fprintf(stderr, "%s:: OUTPUT\n", __func__);
 	calcLayer(nn, OUTPUT);
 }
 

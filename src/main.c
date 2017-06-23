@@ -96,7 +96,7 @@ void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 		//printf("ts6:: %llu cuda backpropagation\n", get_time_usec() - ts);
 
 		if(with_cpu) {
-			getNetworkClassification(nn);
+			classification = getNetworkClassification(nn);
 			if (classification != input_labels[img_count]) errCount++;
 		}
 
@@ -158,7 +158,7 @@ void testNetwork(Network *nn, Cuda_Network *cu_nn)
 			cuda_feed_forward_network(cu_nn);
 
 		if(with_cpu) {
-			getNetworkClassification(nn);
+			classification = getNetworkClassification(nn);
 			if (classification!=lbl) errCount++;
 		}
 
