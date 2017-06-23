@@ -213,7 +213,7 @@ OBJECTS=$(SRC_PATH)/utils/mnist-utils.o \
 		$(SRC_PATH)/3lnn.o \
 		$(SRC_PATH)/main.o
 
-CUDA_OBJECTS=$(SRC_PATH)/cuda/vectorAdd.o
+CUDA_OBJECTS=$(SRC_PATH)/cuda/3lnn.o
 
 
 HEADERS=$(SRC_PATH)/utils/mnist-utils.h \

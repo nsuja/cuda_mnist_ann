@@ -124,7 +124,7 @@ void displayTrainingProgress(int imgCount, int errCount, int y, int x){
     
     if (x!=0 && y!=0) locateCursor(y, x);
     
-    printf("1: TRAINING: Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TRAINING_IMAGES,(int)progress);
+    printf("TRAINING: Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TRAINING_IMAGES,(int)progress);
 
     
     double accuracy = 1 - ((double)errCount/(double)(imgCount+1));
@@ -141,7 +141,7 @@ void displayTestingProgress(int imgCount, int errCount, int y, int x){
     
     if (x!=0 && y!=0) locateCursor(y, x);
     
-    printf("2: TESTING:  Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TESTING_IMAGES,(int)progress);
+    printf("TESTING:  Reading image No. %5d of %5d images [%3d%%]  ",(imgCount+1),MNIST_MAX_TESTING_IMAGES,(int)progress);
     
     
     double accuracy = 1 - ((double)errCount/(double)(imgCount+1));

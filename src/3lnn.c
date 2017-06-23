@@ -336,10 +336,10 @@ void calcLayer(Network *nn, LayerType ltype){
 	Layer *l;
 	l = getLayer(nn, ltype);
 
-	//fprintf(stderr, "PRE Calculando... %d: inp!\n", ltype);
-	//printLayerStatus(nn,INPUT);
-	//fprintf(stderr, "PRE Calculando... %d: hid!\n", ltype);
-	//printLayerStatus(nn,ltype);
+	fprintf(stderr, "PRE Calculando... %d: inp!\n", ltype);
+	printLayerStatus(nn,INPUT);
+	fprintf(stderr, "PRE Calculando... %d: hid!\n", ltype);
+	printLayerStatus(nn,ltype);
 	for (int i=0;i<l->ncount;i++){
 		calcNodeOutput(nn, ltype, i);
 	}
@@ -357,9 +357,10 @@ void calcLayer(Network *nn, LayerType ltype){
  */
 
 void feedForwardNetwork(Network *nn){
-	//fprintf(stderr, "%s:: HIDDEN\n", __func__);
+	fprintf(stderr, "%s:: HIDDEN\n", __func__);
 	calcLayer(nn, HIDDEN);
-	//fprintf(stderr, "%s:: OUTPUT\n", __func__);
+	getchar();
+	fprintf(stderr, "%s:: OUTPUT\n", __func__);
 	calcLayer(nn, OUTPUT);
 }
 
@@ -647,69 +648,5 @@ int getNetworkClassification(Network *nn){
 	}
 
 	return maxInd;
-}
-
-
-
-
-
-
-/**
- * @brief DEBUGGING function
- * @details Prints all the weights (either pointers' target addresses or actual values) on the screen for debugging purposes
- */
-
-void displayNetworkWeightsForDebugging(Network *nn){
-
-	// only print the first x and last x nodes/connections (to improve legible rendering in the console screen)
-	int topLast = 6;
-
-	for (int l=1; l<2;l++){
-
-		Layer *layer = getLayer(nn, OUTPUT);
-
-		printf("Layer %d   Weights\n\n",l);
-
-		// print connections per node and WEIGHT of connection
-
-		if (layer->ncount>0){
-
-			printf("Layer %d   NodeId  |  ConnectionId:WeightAddress \n\n",l);
-
-			int kSize = 5*5;
-
-			// table header
-			printf("Node | ");
-			for (int x=0; x<kSize; x++) {if (x<topLast || x>=kSize-topLast) printf(" conn:address  ");}
-			printf("\n-------");
-			for (int x=0; x<kSize; x++) {if (x<topLast || x>=kSize-topLast) printf("---------------");}
-			printf("\n");
-
-			for (int n=0; n<10; n++){
-
-				printf("%4d | ",n);
-
-				Node *node = getNode(layer, n);
-
-				int connCount = node->wcount;
-
-				for (int c=0; c<connCount; c++){
-
-					// Dereference the weightPointer to validate its pointing to a valid weight
-					double w = node->weights[c];
-
-					if (c<topLast || c>=connCount-topLast) printf("%5d:%9f",c,w);
-				}
-				printf("\n");
-
-
-			}
-			printf("\n\n");
-
-
-		}
-
-	}
-
 }
 

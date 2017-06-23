@@ -1,26 +1,4 @@
-/**
- * @file main.c
- *
- * @mainpage MNIST 1-Layer Neural Network
- *
- * @brief Main characteristics: Only 1 layer (= input layer), no hidden layer.  Feed-forward only.
- * No Sigmoid activation function. No back propagation.\n
- *
- * @details Learning is achieved simply by incrementally updating the connection weights based on the comparison
- * with the desired target output (supervised learning).\n
- *
- * Its performance (success rate) of 85% is far off the state-of-the-art techniques (surprise, surprise) 
- * but close the Yann Lecun's 88% when using only a linear classifier.
- *
- * @see [Simple 1-Layer Neural Network for MNIST Handwriting Recognition](http://mmlind.github.io/Simple_1-Layer_Neural_Network_for_MNIST_Handwriting_Recognition/)
- * @see http://yann.lecun.com/exdb/mnist/
- * @version [Github Project Page](http://github.com/mmlind/mnist-1lnn/)
- * @author [Matt Lind](http://mmlind.github.io)
- * @date July 2015
- *
- */
-
-
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -41,156 +19,162 @@
 
 Utils_Queue *queue;
 
+int with_cpu = 0;
+int with_cuda = 0;
+int inform_timestamps = 0;
+int verbose = 0;
+int max_images = 60000;
+int last_cursor_y = 0;
+
 uint8_t *input_data_u8;
 double *input_data;
 uint8_t *input_labels;
 
 void *read_thread(void *args);
 
-/**
- * @details Trains a layer by looping through and training its cells
- * @param l A pointer to the layer that is to be training
- */
 void trainNetwork(Network *nn, Cuda_Network *cu_nn)
 {
 	int ret;
 	int img_count = 0;
-
 	int errCount = 0;
 	int cu_errCount = 0;
 	uint64_t ts;
-
+	int cu_predictedNum;
+	int classification;
 	uint64_t ts1, ts2, ts3, ts4, ts5, ts6, ts7;
 	ts1 = ts2 = ts3 = ts4 = ts5 = ts6 = ts7 = 0;
 
 	while(img_count < MNIST_MAX_TRAINING_IMAGES) {
 		//fprintf(stderr, "==== IMAGEN NUMERO %d\n", img_count);
 
-//		ts = get_time_usec();
-//		feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
-//		ts1 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cpu)
+			feedInputFixed(nn, &input_data_u8[img_count * (784+1)+1], 784);
+		if(inform_timestamps)
+			ts1 += get_time_usec() - ts;
 		//printf("ts1:: %llu feed_input\n", get_time_usec() - ts);
 
-		ts = get_time_usec();
-		cuda_feed_input_from_super_input(cu_nn, img_count);
-		ts2 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cuda)
+			cuda_feed_input_from_super_input(cu_nn, img_count);
+		if(inform_timestamps)
+			ts2 += get_time_usec() - ts;
 		//printf("ts2:: %llu cuda_feed_input\n", get_time_usec() - ts);
 
-//		ts = get_time_usec();
-//		feedForwardNetwork(nn);
-//		ts3 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cpu)
+			feedForwardNetwork(nn);
+		if(inform_timestamps)
+			ts3 += get_time_usec() - ts;
 		//printf("ts3:: %llu feed_forward\n", get_time_usec() - ts);
 
-		ts = get_time_usec();
-		cuda_feed_forward_network(cu_nn);
-		ts4 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cuda)
+			cuda_feed_forward_network(cu_nn);
+		if(inform_timestamps)
+			ts4 += get_time_usec() - ts;
 		//printf("ts4:: %llu cuda_feed_forward\n", get_time_usec() - ts);
 
-//		ts = get_time_usec();
-//		backPropagateNetwork(nn, input_labels[img_count]);
-//		ts5 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cpu)
+			backPropagateNetwork(nn, input_labels[img_count]);
+		if(inform_timestamps)
+			ts5 += get_time_usec() - ts;
 		//printf("ts5:: %llu backpropagation\n", get_time_usec() - ts);
 
-		ts = get_time_usec();
-		cuda_backpropagate_network(cu_nn, input_labels[img_count]);
-		ts6 += get_time_usec() - ts;
+		if(inform_timestamps)
+			ts = get_time_usec();
+		if(with_cuda)
+			cuda_backpropagate_network(cu_nn, input_labels[img_count]);
+		if(inform_timestamps)
+			ts6 += get_time_usec() - ts;
 		//printf("ts6:: %llu cuda backpropagation\n", get_time_usec() - ts);
 
-		//displayImage(pkt->img, 6,6);
+		if(with_cpu) {
+			getNetworkClassification(nn);
+			if (classification != input_labels[img_count]) errCount++;
+		}
 
-//		int classification = getNetworkClassification(nn);
-//		if (classification != input_labels[img_count]) errCount++;
+		if(with_cuda) {
+			cu_predictedNum = cuda_get_network_classification(cu_nn);
+			if(cu_predictedNum != input_labels[img_count]) cu_errCount++;
+		}
 
-		ts = get_time_usec();
-		int cu_predictedNum;
-		cu_predictedNum = cuda_get_network_classification(cu_nn);
-		if(cu_predictedNum != input_labels[img_count]) cu_errCount++;
-		ts7 += get_time_usec() - ts;
-		//printf("ts7:: %llu cuda backpropagation\n", get_time_usec() - ts);
+		if(with_cpu && verbose) {
+			displayTrainingProgress(img_count, errCount, 8,1);
+		}
+		if(with_cuda && verbose) {
+			displayTrainingProgress(img_count, cu_errCount, 9,1);
+		}
 
-
-		//if(classification != cu_predictedNum) {
-		//	printf("ES DISTINTO %d %d", classification, cu_predictedNum);
-		//}
-
-		//printf("\n      Voy por: %d      Hay   : %d ",img_count, utils_queue_get_count(queue));
-		//printf("\n      Prediction: %d   Actual: %d ",classification, pkt->label);
-		//printf("\n cuda Prediction: %d   Actual: %d ",cu_predictedNum, pkt->label);
-		//getchar();
-
-		//displayTrainingProgress(img_count, errCount, 3,5);
-		displayTrainingProgress(img_count, cu_errCount, 3,5);
-
-//		if(img_count == 1000)
-//			exit(0);
+		if(max_images > 0 && img_count - 1 == max_images) {
+			return;
+		}
 
 		img_count ++;
 	}
-	printf("\n TERMINEE\n");
-	printf("ts1:: %lf %llu %d\n", (double)ts1/(double)img_count, ts1, img_count);
-	printf("ts2:: %lf %llu %d\n", (double)ts2/(double)img_count, ts2, img_count);
-	printf("ts3:: %lf %llu %d\n", (double)ts3/(double)img_count, ts3, img_count);
-	printf("ts4:: %lf %llu %d\n", (double)ts4/(double)img_count, ts4, img_count);
-	printf("ts5:: %lf %llu %d\n", (double)ts5/(double)img_count, ts5, img_count);
-	printf("ts6:: %lf %llu %d\n", (double)ts6/(double)img_count, ts6, img_count);
-	printf("ts7:: %lf %llu %d\n", (double)ts7/(double)img_count, ts7, img_count);
+	if(inform_timestamps) {
+		locateCursor(12, 1);
+		printf("Timestamps: \n");
+		printf("ts1:: %lf %llu %d\n", (double)ts1/(double)img_count, ts1, img_count);
+		printf("ts2:: %lf %llu %d\n", (double)ts2/(double)img_count, ts2, img_count);
+		printf("ts3:: %lf %llu %d\n", (double)ts3/(double)img_count, ts3, img_count);
+		printf("ts4:: %lf %llu %d\n", (double)ts4/(double)img_count, ts4, img_count);
+		printf("ts5:: %lf %llu %d\n", (double)ts5/(double)img_count, ts5, img_count);
+		printf("ts6:: %lf %llu %d\n", (double)ts6/(double)img_count, ts6, img_count);
+	}
 }
-
-/**
- * @details Tests a layer by looping through and testing its cells
- * Exactly the same as TrainLayer() but WITHOUT LEARNING.
- * @param l A pointer to the layer that is to be training
- */
-
-/**
- * @brief Testing the trained network by processing the MNIST testing set WITHOUT updating weights
- * @param nn A pointer to the NN
- */
 
 void testNetwork(Network *nn, Cuda_Network *cu_nn)
 {
-	// open MNIST files
 	FILE *imageFile, *labelFile;
 	imageFile = openMNISTImageFile(MNIST_TESTING_SET_IMAGE_FILE_NAME);
 	labelFile = openMNISTLabelFile(MNIST_TESTING_SET_LABEL_FILE_NAME);
 
 	int errCount = 0;
 	int cu_errCount = 0;
+	int classification;
+	int cu_predictedNum;
 
-	// Loop through all images in the file
 	for (int imgCount=0; imgCount<MNIST_MAX_TESTING_IMAGES; imgCount++){
 
-		// Reading next image and its corresponding label
 		MNIST_Image img = getImage(imageFile);
 		MNIST_Label lbl = getLabel(labelFile);
 
-		// Convert the MNIST image to a standardized vector format and feed into the network
 		Vector *inpVector = getVectorFromImage(&img);
-		//feedInput(nn, inpVector);
-		cuda_feed_input(cu_nn, inpVector);
+		if(with_cpu)
+			feedInput(nn, inpVector);
+		if(with_cuda)
+			cuda_feed_input(cu_nn, inpVector);
 
-		// Feed forward all layers (from input to hidden to output) calculating all nodes' output
-		//feedForwardNetwork(nn);
-		cuda_feed_forward_network(cu_nn);
+		if(with_cpu)
+			feedForwardNetwork(nn);
+		if(with_cuda)
+			cuda_feed_forward_network(cu_nn);
 
-		// Classify image by choosing output cell with highest output
-		//int classification = getNetworkClassification(nn);
-		//if (classification!=lbl) errCount++;
+		if(with_cpu) {
+			getNetworkClassification(nn);
+			if (classification!=lbl) errCount++;
+		}
 
-		int cu_predictedNum;
-		cu_predictedNum = cuda_get_network_classification(cu_nn);
-		if(cu_predictedNum != lbl) cu_errCount++;
+		if(with_cuda) {
+			cu_predictedNum = cuda_get_network_classification(cu_nn);
+			if(cu_predictedNum != lbl) cu_errCount++;
+		}
 
-		// Display progress during testing
-		//displayTestingProgress(imgCount, errCount, 5,5);
-		displayTestingProgress(imgCount, cu_errCount, 5,5);
-
+		if(with_cpu)
+			displayTestingProgress(imgCount, errCount, 10,1);
+		if(with_cuda)
+			displayTestingProgress(imgCount, cu_errCount, 11,1);
 	}
 
-	// Close files
 	fclose(imageFile);
 	fclose(labelFile);
-
 }
 
 void *read_data(void)
@@ -214,7 +198,7 @@ void *read_data(void)
 		img_count ++;
 	}
 
-	printf("\n Termine de leer.. meti %d \n", img_count);
+	//printf("\n Termine de leer.. meti %d \n", img_count);
 	fclose(imageFile);
 	fclose(labelFile);
 }
@@ -252,23 +236,90 @@ void *read_thread(void *args)
 		utils_queue_insert(queue, (void *)pkt);
 	}
 
-	printf("\n Termine de leer.. meti %d \n", img_count);
+	//printf("\n Termine de leer.. meti %d \n", img_count);
 	fclose(imageFile);
 	fclose(labelFile);
 }
 
-/**
- * @details Main function to run MNIST-1LNN
- */
+void print_help(const char *argv[])
+{
+	fprintf(stderr,
+			"Uso: %s -m [MODO] [OPCIONES]\n"
+			"Entrena y verifica el funcionamiento de la red neuronal de 3 layers\n"
+			"\n"
+			"Obligatorias\n"
+			"  -m            Modo de funcionamiento: \n"
+			"                  -m 1 : CUDA \n"
+			"                  -m 2 : CPU \n"
+			"                  -m 3 : CUDA + CPU \n"
+			"Opcional\n"
+			"  -h            Imprimir este mensaje\n"
+			"  -v            Verbose (default: 0)\n"
+			"  -t            Tomar timestamps (default: 0)\n"
+			"  -l            Limite de imagenes de entrenamiento (default: 60000)\n"
+			"Ejemplos\n"
+			"  %s -m 1 -vt         Ejecuta la red neuronal solo CUDA, modo verbose e informe de timestamps\n"
+			"  %s -m 3 -t          Ejecuta la red neuronal CUDA + CPU, con informe de timestamps\n"
+			"  %s -m 2 -l 10000    Ejecuta la red neuronal CUDA y entrena con 10000 imagenes\n"
+			, argv[0], argv[0], argv[0], argv[0]);
+}
 
 int main(int argc, const char * argv[])
 {
-	// remember the time in order to calculate processing time at the end
-	time_t startTime = time(NULL);
+	int opt;
+	int mode = -1;
 
-	// clear screen of terminal window
+	while ((opt = getopt(argc, (char *const *)argv, "hvm:tl:")) != -1) {
+		switch (opt) {
+			case 'h':
+				print_help(argv);
+				break;
+			case 'v':
+				verbose = 1;
+				break;
+			case 'm':
+				mode = atoi(optarg);
+				break;
+			case 't':
+				inform_timestamps = 1;
+				break;
+			case 'l':
+				max_images = atoi(optarg);
+				break;
+			default:
+				print_help(argv);
+				exit(EXIT_FAILURE);
+		}
+	}
+
+	switch(mode) {
+		case 1:
+			with_cuda = 1;
+			break;
+		case 2:
+			with_cpu = 1;
+			break;
+		case 3:
+			with_cuda = 1;
+			with_cpu = 1;
+			break;
+		default:
+			fprintf(stderr, "No se especifico modo!\n");
+			print_help(argv);
+			exit(EXIT_FAILURE);
+	}
+
 	clearScreen();
-	printf("    MNIST-1LNN: a simple 1-layer neural network processing the MNIST handwriting images\n");
+
+	time_t startTime = time(NULL);
+	if(verbose) {
+		printf("Red neuronal de 3 capas para el reconocimiento de digitos numerico\n");
+		printf("Configuracion: \n");
+		printf("\tCUDA: %s\n", with_cuda == 1 ? "ON" : "OFF");
+		printf("\tCPU: %s\n", with_cpu == 1 ? "ON" : "OFF");
+		printf("\tRecord timestamps: %s\n", inform_timestamps == 1 ? "ON" : "OFF");
+		printf("\tLimite: %d\n", max_images);
+	}
 
 	queue = utils_queue_alloc();
 
@@ -287,18 +338,19 @@ int main(int argc, const char * argv[])
 
 	uint64_t ts1 = get_time_usec();
 	cuda_copy_to_super_input(cu_nn, input_data);
-	printf("COPIA A SUPER INPUT:: %llu\n", get_time_usec() - ts1);
+	//printf("COPIA A SUPER INPUT:: %llu\n", get_time_usec() - ts1);
 
 	trainNetwork(nn, cu_nn);
 
 	testNetwork(nn, cu_nn);
 
-	locateCursor(38, 5);
-
 	// Calculate and print the program's total execution time
 	time_t endTime = time(NULL);
 	double executionTime = difftime(endTime, startTime);
-	printf("\n    DONE! Total execution time: %.1f sec\n\n",executionTime);
+	if(inform_timestamps) {
+		locateCursor(19, 1);
+		printf("DONE! Tiempo total de ejecucion: %.1f seg\n",executionTime);
+	}
 
 	return 0;
 }

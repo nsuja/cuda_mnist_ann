@@ -1,22 +1,3 @@
-/**
- * Copyright 1993-2015 NVIDIA Corporation.  All rights reserved.
- *
- * Please refer to the NVIDIA end user license agreement (EULA) associated
- * with this source code for terms and conditions that govern your use of
- * this software. Any use, reproduction, disclosure, or distribution of
- * this software and related documentation outside the terms of the EULA
- * is strictly prohibited.
- *
- */
-
-/**
- * Vector addition: C = A + B.
- *
- * This sample is a very basic sample that implements element by element
- * vector addition. It is the same as the sample illustrating Chapter 2
- * of the programming guide with some additions like error checking.
- */
-
 #include <errno.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -40,6 +21,7 @@
 #define CUDA_LAYER_CANT (3)
 
 #define CUDA_LEARNING_RATE_SIGMOID (0.2) //91.5%
+//No dio aumento de performance significativo
 __constant__ double _cuda_learning_rate;
 
 #define NO_DEBUG_ALL (1)
@@ -71,18 +53,7 @@ typedef enum {
 } Cuda_Layer_Type;
 
 /**
- * @brief Core unit of the neural network (neuron and synapses)
- */
-struct Cuda_Cell{
-	int n_inputs;
-	double *input;
-	double *weight;
-	double output;
-	double bias;
-};
-
-/**
- * @brief Dynamic data structure modeling a neuron with a variable number of connections/weights
+ * @brief Nodo con sus pesos
  */
 struct Cuda_Node {
 	int wcount;
@@ -90,7 +61,7 @@ struct Cuda_Node {
 };
 
 /**
- * @brief Dynamic data structure holding a definable number of nodes that form a layer
+ * @brief Capa de la red, conjunto de nodos con un vector de salidas
  */
 struct Cuda_Layer {
 	int n_output;
@@ -102,7 +73,7 @@ struct Cuda_Layer {
 };
 
 /**
- * @brief Dynamic data structure holding the whole network
+ * @brief Red neuronal, compuesta por sus layers
  */
 struct Cuda_Network{
 	double learning_rate;         ///< Factor by which connection weight changes are applied
@@ -113,119 +84,20 @@ struct Cuda_Network{
 	cudaStream_t *streams;
 };
 
-
+/**
+ * Prototipos
+ */
 int cuda_init_super_input(Cuda_Network *nn);
 Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype);
 
+/**
+ * Kernels
+ */
 uint64_t cu_get_time_usec()
 {
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return tv.tv_sec * 1000000ULL + tv.tv_usec;
-}
-
-/**
- * CUDA Kernel Device code
- *
- * Computes the vector addition of A and B into C. The 3 vectors have the same
- * number of elements numElements.
- */
-template <unsigned int block_size>
-__global__ void cu_dot(double * a_d, double * b_d, double * block_results_d,
-		size_t size) {
-	extern __shared__ int cache[];
-
-	unsigned int tid = threadIdx.x;
-	int idx = threadIdx.x + blockIdx.x * blockDim.x;
-	cache[tid] = 0;
-
-	if(idx < size) {
-		cache[tid] = a_d[idx] * b_d[idx];
-	}
-
-	__syncthreads();
-	if(block_size >= 512) {
-		if(tid < 256) {
-			cache[tid] += cache[tid + 256];
-		}
-		__syncthreads();
-	}
-
-	if(block_size >= 256) {
-		if(tid < 128) {
-			cache[tid] += cache[tid + 128];
-		}
-		__syncthreads();
-	}
-
-	if(block_size >= 128) {
-		if(tid < 64) {
-			cache[tid] += cache[tid + 64];
-		}
-		__syncthreads();
-	}
-
-	if(tid < 32) {
-		if(block_size >= 64) {
-			cache[tid] += cache[tid + 32];
-		}
-		__syncthreads();
-
-		if(block_size >= 32) {
-			cache[tid] += cache[tid + 16];
-		}
-		__syncthreads();
-
-		if(block_size >= 16) {
-			cache[tid] += cache[tid + 8];
-		}
-		__syncthreads();
-
-		if(block_size >= 8) {
-			cache[tid] += cache[tid + 4];
-		}
-		__syncthreads();
-
-		if(block_size >= 4) {
-			cache[tid] += cache[tid + 2];
-		}
-		__syncthreads();
-
-		if(block_size >= 2) {
-			cache[tid] += cache[tid + 1];
-		}
-	}
-
-	__syncthreads();
-	if(tid == 0) {
-		block_results_d[blockIdx.x] = cache[0];
-	}
-}
-
-
-
-	__global__ void
-vectorAdd(const float *A, const float *B, float *C, int numElements)
-{
-	int i = blockDim.x * blockIdx.x + threadIdx.x;
-
-	if (i < numElements)
-	{
-		C[i] = A[i] + B[i];
-	}
-}
-
-	__global__ void
-vectorUpdateWeight(const double *input, double *weight, const int size, double err)
-{
-	int tid = blockDim.x * blockIdx.x + threadIdx.x;
-
-	if(tid < size) {
-		//printf("old weight[%d] %f\n", tid, weight[tid]);
-		weight[tid] += input[tid] * err * 0.05;
-		//printf("new weight[%d] %f\n", tid, weight[tid]);
-		tid += blockDim.x * gridDim.x;
-	}
 }
 
 __global__ void printInput(const double *V1, const int size)
@@ -403,6 +275,9 @@ __global__ void vectorUpdateWeights(double *weights, double *prev_outputs, doubl
 //	}
 }
 
+/**
+ * Funciones normales
+ */
 void cuda_print_vector(FILE * fp, char *name, double *vec, int n)
 {
 	double *aux;
@@ -454,44 +329,6 @@ void print_layer_status(Cuda_Network *nn, Cuda_Layer_Type ltype, int print_weigh
 	}
 }
 
-extern "C" int copy_to_cuda(uint8_t *buf, int size)
-{
-	uint8_t *dev_buf = NULL;
-	cudaError_t err = cudaSuccess;
-	err = cudaMalloc((void **)&dev_buf, size);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "Failed to allocate device vector A (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-	err = cudaFree(dev_buf);
-	if (err != cudaSuccess) {
-		fprintf(stderr, "Failed to free device vector A (error code %s)!\n", cudaGetErrorString(err));
-		return -1;
-	}
-	return 0;
-}
-
-//extern "C" int cuda_get_layer_prediction(Cuda_Layer *l)
-//{
-//	double maxOut = 0;
-//	int maxInd = 0;
-//
-//	for (int i=0; i < l->n_output; i++){
-//		if (l->cell[i].output > maxOut){
-//			maxOut = l->cell[i].output;
-//			maxInd = i;
-//		}
-//	}
-//
-//	return maxInd;
-//}
-
-/**
- * @brief Creates a layer with default values
- *
- * @param node_count Number of nodes in layer
- * @param weight_count Number of weights per node
- */
 Cuda_Layer *cuda_create_layer(int node_count, int weight_count)
 {
 	cudaError_t err = cudaSuccess;
@@ -534,13 +371,6 @@ Cuda_Layer *cuda_create_layer(int node_count, int weight_count)
 	return layer;
 }
 
-/**
- * @brief Initializes the NN by creating and copying INTPUT, HIDDEN, OUTPUT data structures into the NN's memory space
- * @param nn A pointer to the NN
- * @param inpCount Number of nodes in the INPUT layer
- * @param hidCount Number of nodes in the HIDDEN layer
- * @param out_count Number of nodes in the OUTPUT layer
- */
 int cuda_init_network(Cuda_Network *nn, int in_count, int hid_count, int out_count)
 {
 	nn->layers = (Cuda_Layer **)calloc(1, sizeof(Cuda_Layer*) * CUDA_LAYER_CANT);
@@ -557,10 +387,6 @@ int cuda_init_network(Cuda_Network *nn, int in_count, int hid_count, int out_cou
 	return 0;
 }
 
-/**
- * @brief Sets the default network parameters (which can be overwritten/changed)
- * @param nn A pointer to the NN
- */
 void cuda_set_network_defaults(Cuda_Network *nn)
 {
 	//TODO Ajustar learning rate segun funcion de activacion
@@ -573,11 +399,6 @@ void cuda_set_network_defaults(Cuda_Network *nn)
 	cudaMemcpyToSymbol(_cuda_learning_rate, &nn->learning_rate, sizeof(double));
 }
 
-/**
- * @brief Returns one of the layers of the network
- * @param nn A pointer to the NN
- * @param ltype Type of layer to be returned (INPUT, HIDDEN, OUTPUT)
- */
 Cuda_Layer *cuda_get_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l;
@@ -743,12 +564,6 @@ int cuda_layer_init_weights(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	return 0;
 }
 
-/**
- * @brief Creates a dynamically-sized, 3-layer (INTPUT, HIDDEN, OUTPUT) neural network
- * @param in_count Number of nodes in the INPUT layer
- * @param hid_count Number of nodes in the HIDDEN layer
- * @param out_count Number of nodes in the OUTPUT layer
- */
 Cuda_Network *cuda_create_network(int in_count, int hid_count, int out_count)
 {
 	int ret;
@@ -793,11 +608,6 @@ _create_network_exit_error:
 	return NULL;
 }
 
-/**
- * @brief Back propagates network error to hidden layer
- * @param nn A pointer to the NN
- * @param targetClassification Correct classification (=label) of the input stream
- */
 int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 {
 	static double *super_weight_vector = NULL;
@@ -853,11 +663,6 @@ int cuda_backpropagate_hidden_layer(Cuda_Network *nn, int target_class)
 	return 0;
 }
 
-/**
- * @brief Back propagates network error in output layer
- * @param nn A pointer to the NN
- * @param targetClassification Correct classification (=label) of the input stream
- */
 int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 {
 	int n;
@@ -886,11 +691,6 @@ int cuda_backpropagate_output_layer(Cuda_Network *nn, int target_class)
 	return 0;
 }
 
-/**
- * @brief Back propagates network error from output layer to hidden layer
- * @param nn A pointer to the NN
- * @param targetClassification Correct classification (=label) of the input stream
- */
 void cuda_backpropagate_network(Cuda_Network *nn, int target_class)
 {
 	//fprintf(stderr, "----CUDA Pre backpropagate!\n");
@@ -906,12 +706,6 @@ void cuda_backpropagate_network(Cuda_Network *nn, int target_class)
 	//print_layer_status(nn, CUDA_LAYER_HIDDEN, 1);
 }
 
-/**
- * @brief Performs an activiation function (as defined in the NN's defaults) to a specified node
- * @param nn A pointer to the NN
- * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
- * @param id Sequential id of the node that is to be calculated
- */
 void cuda_activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
@@ -933,12 +727,6 @@ void cuda_activate_node(Cuda_Network *nn, Cuda_Layer_Type ltype)
 
 	sigmoid_kernel<<<blocks_per_grid, THREAD_PER_BLOCK>>>(l->outputs, l->outputs, l->n_output);
 }
-
-/**
- * @brief Calculates the output value of a specified node by multiplying all its weights with the previous layer's outputs
- * @param nn A pointer to the NN
- * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
- */
 
 int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
@@ -999,11 +787,6 @@ int cuda_calc_node_output(Cuda_Network *nn, Cuda_Layer_Type ltype)
 	return 0;
 }
 
-/**
- * @brief Calculates the output values of a given NN layer
- * @param nn A pointer to the NN
- * @param ltype Type of layer (INPUT, HIDDEN, OUTPUT)
- */
 void cuda_calc_layer(Cuda_Network *nn, Cuda_Layer_Type ltype)
 {
 	Cuda_Layer *l = cuda_get_layer(nn, ltype);
@@ -1039,12 +822,6 @@ void cuda_feed_forward_network(Cuda_Network *nn)
 	//print_layer_status(nn, CUDA_LAYER_OUTPUT, 1);
 }
 
-
-/**
- * @brief Feeds some Vector data into the INPUT layer of the NN
- * @param nn A pointer to the NN
- * @param v A pointer to a vector
- */
 int cuda_feed_input(Cuda_Network *nn, Vector *v)
 {
 	cudaError_t err = cudaSuccess;
@@ -1064,10 +841,6 @@ int cuda_feed_input(Cuda_Network *nn, Vector *v)
 	return 0;
 }
 
-/**
- * @brief Returns the network's classification using the ID of teh node with the hightest output
- * @param nn A pointer to the NN
- */
 int cuda_get_network_classification(Cuda_Network *nn)
 {
 	cudaError_t err = cudaSuccess;
@@ -1131,11 +904,6 @@ int cuda_copy_to_super_input(Cuda_Network *nn, double *input_data)
 	return 0;
 }
 
-/**
- * @brief Feeds some Vector data into the INPUT layer of the NN
- * @param nn A pointer to the NN
- * @param v A pointer to a vector
- */
 int cuda_feed_input_from_super_input(Cuda_Network *nn, int i)
 {
 	Cuda_Layer *il = cuda_get_layer(nn, CUDA_LAYER_INPUT);
